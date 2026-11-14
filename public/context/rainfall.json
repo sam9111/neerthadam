@@ -1,0 +1,34 @@
+{
+  "source": "NASA POWER \u00b7 GPM IMERG",
+  "sourceUrl": "https://power.larc.nasa.gov/docs/methodology/data/sources_meteorology/",
+  "requestUrl": "https://power.larc.nasa.gov/api/temporal/daily/point?parameters=IMERG_PRECTOT&community=AG&longitude=80.22&latitude=12.93&start=20260629&end=20261111&format=JSON&time-standard=UTC",
+  "longitude": 80.22,
+  "latitude": 12.93,
+  "units": "mm",
+  "windows": {
+    "2026-07-06": {
+      "start": "2026-06-29",
+      "end": "2026-07-05",
+      "total": 5.55,
+      "validDays": 7
+    },
+    "2026-07-18": {
+      "start": "2026-07-11",
+      "end": "2026-07-17",
+      "total": 2.12,
+      "validDays": 7
+    },
+    "2026-10-30": {
+      "start": "2026-10-23",
+      "end": "2026-10-29",
+      "total": null,
+      "validDays": 0
+    },
+    "2026-11-11": {
+      "start": "2026-11-04",
+      "end": "2026-11-10",
+      "total": null,
+      "validDays": 0
+    }
+  }
+}
