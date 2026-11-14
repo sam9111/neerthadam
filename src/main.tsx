@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { asset, observationDate, type Catalog, type Polarization } from './catalog'
 import { RadarMap, type ChangePoint } from './Map'
+import { BackscatterSwipe } from './BackscatterSwipe'
 import './style.css'
 
 type Rainfall = { source: string; sourceUrl: string; windows: Record<string, {
@@ -31,6 +32,7 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   const [dateId, setDate] = useState('')
   const [pol, setPol] = useState<Polarization>('HH')
   const [optical, setOptical] = useState(false)
+  const [showDifference, setShowDifference] = useState(false)
   const [showCoverage, setCoverage] = useState(false)
   const [showMethods, setMethods] = useState(false)
   const [details, setDetails] = useState<ChangePoint>()
@@ -42,7 +44,8 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   const later = group.observations.find(item => item.id === pair?.laterId)
   const change = !dateId && !!pair
   const active = change ? pair : observation
-  const layer = active.layers[pol]
+  const difference = change && showDifference
+  const layer = change && !difference && later ? later.layers[pol] : active.layers[pol]
   const candidates = useAsset<{ features: Array<{ properties: ChangePoint }> }>(change ? pair.candidateUrl : undefined)
   const points = useMemo(() => (candidates?.features ?? []).map(item => item.properties)
     .filter(point => point.polarization === pol && point.pixel_centroid_lon_lat?.length === 2)
@@ -57,7 +60,7 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   }, [])
 
   return <main className="explorer">
-    <RadarMap site={catalog.site} layer={layer} coverage={active.coverageUrl}
+    <RadarMap site={catalog.site} layer={layer} coverage={change && !difference && later ? later.coverageUrl : active.coverageUrl}
       showCoverage={showCoverage} optical={optical} points={featured}
       onSelect={selectCandidate} selected={details} />
     <header className="brand floating">
@@ -65,12 +68,12 @@ function Explorer({ catalog }: { catalog: Catalog }) {
       <div><h1>Neerthadam</h1><p>Pallikaranai Marsh · Chennai</p></div>
     </header>
     <div className="view-switch floating" aria-label="Map layers">
-      <button type="button" aria-pressed={!optical} onClick={() => setOptical(false)}>Radar</button>
+      <button type="button" aria-pressed={!optical} onClick={() => setOptical(false)}>NISAR imagery</button>
       <button type="button" aria-pressed={optical} onClick={() => setOptical(true)}>Optical + infrastructure</button>
     </div>
     <section className="control-card floating" aria-label="Observation controls">
       <div className="control-heading">
-        <div><h2>{change ? 'Radar change' : 'Radar backscatter'}</h2><p>{title}</p></div>
+        <div><h2>{difference ? 'Radar change' : 'NISAR backscatter'}</h2><p>{title}</p></div>
         <span className={`maturity ${group.maturity}`}>{group.maturity}</span>
       </div>
       <div className="controls">
@@ -97,11 +100,14 @@ function Explorer({ catalog }: { catalog: Catalog }) {
         </div>
       </div>
       {optical ? <p className="hint">Reference imagery · gold roads · cyan building footprints at closer zoom.</p> :
-        <div className="legend"><div className={change ? 'colorbar change' : 'colorbar'} />
-          <div><span>{change ? 'Weaker return' : 'Weaker'} · {layer.min} dB</span><span>{change ? 'Stronger return' : 'Stronger'} · {layer.max} dB</span></div></div>}
+        <div className="legend"><div className={difference ? 'colorbar change' : 'colorbar'} />
+          <div><span>{difference ? 'Weaker return' : 'Darker'} · {layer.min} dB</span><span>{difference ? 'Stronger return' : 'Brighter'} · {layer.max} dB</span></div></div>}
+      {change && !optical && <button className="difference-toggle" type="button" aria-pressed={difference}
+        onClick={() => setShowDifference(!showDifference)}>{difference ? 'Change colors shown' : 'Show change colors'}</button>}
+      {change && !optical && !difference && later && <p className="hint">Showing the {day(later.date)} NISAR image.</p>}
       <div className="card-footer">
         <button type="button" aria-pressed={showCoverage} onClick={() => setCoverage(!showCoverage)}>
-          {coverage(active.coveragePct)} site coverage
+          {coverage(change && !difference && later ? later.coveragePct : active.coveragePct)} site coverage
         </button>
         <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined))}>How to read this map</button>
       </div>
@@ -125,6 +131,9 @@ function Explorer({ catalog }: { catalog: Catalog }) {
       <span className="kicker">Candidate radar change</span>
       <h2>{details.tail === 'upper' ? 'Stronger radar return' : 'Weaker radar return'}</h2>
       <p><strong>{db(details.median_change_db)}</strong> median change · {details.site_area_ha.toFixed(2)} ha · {pol}</p>
+      {earlier && later && <BackscatterSwipe key={details.pixel_centroid_lon_lat.join(',')}
+        before={earlier.layers[pol]} after={later.layers[pol]} center={details.pixel_centroid_lon_lat}
+        beforeDate={earlier.date} afterDate={later.date} channel={pol} />}
       <h3>Rainfall near Pallikaranai</h3>
       {dates.map(date => {
         const window = rain?.windows[date.slice(0, 10)]
