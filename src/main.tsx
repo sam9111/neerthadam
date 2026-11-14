@@ -29,7 +29,7 @@ const db = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`
 function Explorer({ catalog }: { catalog: Catalog }) {
   const [groupIndex, setGroup] = useState(0)
   const [pairIndex, setPair] = useState(0)
-  const [dateId, setDate] = useState('')
+  const [dateIndex, setDateIndex] = useState(0)
   const [pol, setPol] = useState<Polarization>('HH')
   const [optical, setOptical] = useState(false)
   const [showDifference, setShowDifference] = useState(false)
@@ -39,20 +39,19 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   const rain = useAsset<Rainfall>('context/rainfall.json')
   const group = catalog.groups[groupIndex]
   const pair = group.comparisons[pairIndex]
-  const observation = group.observations.find(item => item.id === dateId) ?? group.observations.at(-1)!
+  const observation = group.observations[dateIndex]
   const earlier = group.observations.find(item => item.id === pair?.earlierId)
   const later = group.observations.find(item => item.id === pair?.laterId)
-  const change = !dateId && !!pair
-  const active = change ? pair : observation
-  const difference = change && showDifference
-  const layer = change && !difference && later ? later.layers[pol] : active.layers[pol]
-  const candidates = useAsset<{ features: Array<{ properties: ChangePoint }> }>(change ? pair.candidateUrl : undefined)
+  const difference = !!pair && showDifference
+  const active = difference ? pair : observation
+  const layer = active.layers[pol]
+  const candidates = useAsset<{ features: Array<{ properties: ChangePoint }> }>(pair?.candidateUrl)
   const points = useMemo(() => (candidates?.features ?? []).map(item => item.properties)
     .filter(point => point.polarization === pol && point.pixel_centroid_lon_lat?.length === 2)
     .sort((a, b) => b.site_area_ha - a.site_area_ha), [candidates, pol])
   const featured = useMemo(() => points.slice(0, 8), [points])
-  const dates = change && earlier && later ? [earlier.date, later.date] : [observation.date]
-  const title = change && earlier && later ? `${day(earlier.date)} – ${observationDate(later.date)}` : observationDate(observation.date)
+  const dates = details && earlier && later ? [earlier.date, later.date] : [observation.date]
+  const title = difference && earlier && later ? `${day(earlier.date)} – ${observationDate(later.date)}` : observationDate(observation.date)
 
   const selectCandidate = useCallback((point: ChangePoint) => {
     setDetails(point)
@@ -60,7 +59,7 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   }, [])
 
   return <main className="explorer">
-    <RadarMap site={catalog.site} layer={layer} coverage={change && !difference && later ? later.coverageUrl : active.coverageUrl}
+    <RadarMap site={catalog.site} layer={layer} coverage={active.coverageUrl}
       showCoverage={showCoverage} optical={optical} points={featured}
       onSelect={selectCandidate} selected={details} />
     <header className="brand floating">
@@ -78,22 +77,18 @@ function Explorer({ catalog }: { catalog: Catalog }) {
       </div>
       <div className="controls">
         <select aria-label="Acquisition group" value={groupIndex} onChange={event => {
-          setGroup(Number(event.target.value)); setPair(0); setDate(''); setDetails(undefined)
+          setGroup(Number(event.target.value)); setPair(0); setDateIndex(0); setShowDifference(false); setDetails(undefined)
         }}>
           {catalog.groups.map((item, index) => <option key={item.id} value={index}>
             {day(item.observations[0].date)} series · {item.spacingM} m · {item.maturity}
           </option>)}
         </select>
-        <select aria-label="Radar view" value={dateId || `pair-${pairIndex}`} onChange={event => {
-          const value = event.target.value
-          if (value.startsWith('pair-')) { setPair(Number(value.slice(5))); setDate('') } else setDate(value)
-          setDetails(undefined)
-        }}>
-          {group.comparisons.map((item, index) => <option key={index} value={`pair-${index}`}>
-            Change · {day(group.observations.find(o => o.id === item.earlierId)!.date)}–{day(group.observations.find(o => o.id === item.laterId)!.date)}
+        {group.comparisons.length > 1 && <select aria-label="Candidate comparison dates" value={pairIndex}
+          onChange={event => { setPair(Number(event.target.value)); setDetails(undefined) }}>
+          {group.comparisons.map((item, index) => <option key={index} value={index}>
+            {day(group.observations.find(o => o.id === item.earlierId)!.date)}–{day(group.observations.find(o => o.id === item.laterId)!.date)}
           </option>)}
-          {group.observations.map(item => <option key={item.id} value={item.id}>{observationDate(item.date)}</option>)}
-        </select>
+        </select>}
         <div className="polar" aria-label="Radar polarization">
           {(['HH', 'HV'] as const).map(channel => <button key={channel} type="button" aria-pressed={pol === channel}
             onClick={() => { setPol(channel); setDetails(undefined) }}>{channel}</button>)}
@@ -102,16 +97,27 @@ function Explorer({ catalog }: { catalog: Catalog }) {
       {optical ? <p className="hint">Reference imagery · gold roads · cyan building footprints at closer zoom.</p> :
         <div className="legend"><div className={difference ? 'colorbar change' : 'colorbar'} />
           <div><span>{difference ? 'Weaker return' : 'Darker'} · {layer.min} dB</span><span>{difference ? 'Stronger return' : 'Brighter'} · {layer.max} dB</span></div></div>}
-      {change && !optical && <button className="difference-toggle" type="button" aria-pressed={difference}
+      {pair && !optical && <button className="difference-toggle" type="button" aria-pressed={difference}
         onClick={() => setShowDifference(!showDifference)}>{difference ? 'Change colors shown' : 'Show change colors'}</button>}
-      {change && !optical && !difference && later && <p className="hint">Showing the {day(later.date)} NISAR image.</p>}
       <div className="card-footer">
         <button type="button" aria-pressed={showCoverage} onClick={() => setCoverage(!showCoverage)}>
-          {coverage(change && !difference && later ? later.coveragePct : active.coveragePct)} site coverage
+          {coverage(active.coveragePct)} site coverage
         </button>
         <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined))}>How to read this map</button>
       </div>
-      {change && !optical && <p className="hint">{points.length ? `Explore ${featured.length} of ${points.length} candidate areas. Hover for a preview or select for rainfall.` : 'Candidate markers are available for the July 10 m series.'}</p>}
+      {pair && featured.length > 0 && earlier && later && <p className="hint">Markers show candidate changes from {day(earlier.date)} to {day(later.date)}.</p>}
+    </section>
+    <section className="time-card floating" aria-label="Map time slider">
+      <div className="time-heading"><strong>Acquisition timeline</strong><span>{observationDate(observation.date)}</span></div>
+      <input type="range" min={0} max={group.observations.length - 1} step={1} value={dateIndex}
+        disabled={group.observations.length < 2}
+        aria-label="NISAR acquisition date" aria-valuetext={observationDate(observation.date)}
+        onChange={event => { setDateIndex(Number(event.target.value)); setOptical(false); setShowDifference(false) }} />
+      <div className="time-dates">
+        <span>{day(group.observations[0].date)}</span>
+        <span>{group.observations.length} observations</span>
+        <span>{day(group.observations.at(-1)!.date)}</span>
+      </div>
     </section>
     {showMethods && <aside className="info-card floating" aria-label="Map methods">
       <button type="button" className="close" aria-label="Close methods" onClick={() => setMethods(false)}>×</button>
