@@ -184,7 +184,7 @@ export function RadarMap({ site, raster, optical, opacity, coverage, missing, le
     for (const view of [primary.current, overlayReady ? overlay.current : null]) {
       if (!view) continue
       setFootprint(view, 'valid', view === overlay.current ? leftCoverage ?? coverage : coverage, '#53e4ce')
-      setFootprint(view, 'missing', view === overlay.current ? leftMissing ?? missing : missing, '#ecad61')
+      setFootprint(view, 'missing', view === overlay.current ? leftMissing ?? (leftCoverage === undefined ? missing : undefined) : missing, '#ecad61')
     }
   }, [ready, overlayReady, coverage, missing, leftCoverage, leftMissing])
 

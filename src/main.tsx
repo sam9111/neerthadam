@@ -66,25 +66,29 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const opticalIndex = sentinel.value?.derivedProducts.find(item => item.kind === opticalLayer)
   const sensorSwipe = display === 'sensor-swipe'
   const opticalMap = display === 'optical'
+  // July 18 T44PMV SCL contained only class 9 over the site (31,160 centers).
+  // See research/sentinel_july_screen.csv for the source and native quality counts.
+  const cloudyExample = step === 1 && sensorSwipe && observation.date.startsWith('2026-07-18')
+  const opticalDate = cloudyExample ? '2026-07-18' : optical?.acquiredAt
   const difference = comparing && display === 'difference'
   const radarLayer = difference ? pair.layers[pol] : comparing ? later?.layers[pol] : observation.layers[pol]
   const opticalRaster = useMemo(() => optical ? {
     url: opticalIndex?.assets[opticalLayer.toLowerCase()] ?? optical.assets.rgb,
     coordinates: opticalIndex?.coordinates ?? optical.coordinates,
   } : undefined, [optical, opticalIndex, opticalLayer])
-  const raster = display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
+  const raster = display === 'reference' ? undefined : opticalMap || sensorSwipe ? cloudyExample ? undefined : opticalRaster : radarLayer
   const swipe = comparing && display === 'swipe' && earlier && later ? {
     raster: earlier.layers[pol], left: shortDate(earlier.date), right: shortDate(later.date),
-  } : sensorSwipe && optical ? {
+  } : sensorSwipe && opticalDate ? {
     raster: observation.layers[pol], left: `NISAR · ${shortDate(observation.date)}`,
-    right: `Sentinel-2 · ${shortDate(optical.acquiredAt)}`,
+    right: `Sentinel-2 · ${shortDate(opticalDate)}`,
   } : undefined
   const observedSupport = comparing ? pair : observation
   const opticalMaskBase = optical ? `context/sentinel/${optical.acquiredAt.slice(0, 10)}` : ''
   const radarCoverage = observedSupport.coverageUrl
   const radarMissing = radarCoverage.replace('/coverage-', '/missing-')
-  const coverage = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-coverage.geojson` : radarCoverage
-  const missing = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-missing.geojson` : radarMissing
+  const coverage = cloudyExample ? undefined : opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-coverage.geojson` : radarCoverage
+  const missing = cloudyExample ? catalog.site.boundaryUrl : opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-missing.geojson` : radarMissing
   const measured = useMemo(() => comparing && earlier && later ? [earlier, later] : [observation], [comparing, earlier, later, observation])
   const median = comparing ? pair.fixedFootprint[pol].median : null
 
@@ -98,7 +102,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   function tourStep(next: number) {
     setStep(next)
     setGroup(defaultGroup)
-    setDate(next === 3 ? Math.min(1, catalog.groups[defaultGroup].observations.length - 1) : 0)
+    setDate(next === 1 || next === 3 ? Math.min(1, catalog.groups[defaultGroup].observations.length - 1) : 0)
     setPair(0)
     setPol('HH')
     setOpacity(1)
@@ -106,7 +110,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
     setInfrastructure(next === 0 || next === 4)
     setMode(next === 3 ? 'Compare' : next === 1 || next === 4 ? 'Investigate' : 'Observe')
     setDisplay(next === 0 ? 'reference' : next === 1 ? 'sensor-swipe' : next === 3 ? 'swipe' : next === 4 ? 'optical' : 'radar')
-    setFootprint(next === 1 || next === 2 || next === 3 ? 'valid' : 'off')
+    setFootprint(next === 1 ? 'missing' : next === 2 || next === 3 ? 'valid' : 'off')
     setLocation(next === 4 ? catalog.site.center : undefined)
     setContextOpen(next === 4)
   }
@@ -134,7 +138,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
     <RadarMap site={catalog.site} raster={raster} swipe={swipe} optical={opticalMap || display === 'reference'}
       opacity={opacity} coverage={footprint === 'valid' ? coverage : undefined}
       missing={footprint === 'missing' ? missing : undefined}
-      leftCoverage={sensorSwipe && footprint === 'valid' ? radarCoverage : undefined}
+      leftCoverage={sensorSwipe && (footprint === 'valid' || cloudyExample) ? radarCoverage : undefined}
       leftMissing={sensorSwipe && footprint === 'missing' ? radarMissing : undefined}
       selected={location} onInspect={inspect} infrastructure={infrastructure} />
     <header className="brand floating"><span className="brand-icon" aria-hidden="true">≋</span>
@@ -184,10 +188,11 @@ function Workspace({ catalog }: { catalog: Catalog }) {
         {sentinel.value?.derivedProducts.filter(item => item.kind === 'NDVI' || item.kind === 'MNDWI').map(item =>
           <option key={item.id} value={item.kind}>{item.kind}</option>)}
       </select></label>}
-      {(sensorSwipe || opticalMap) && !optical && <p className="meta" role="status">{sentinel.failed ? 'Optical data unavailable.' : 'Loading optical observation…'}</p>}
-      {sensorSwipe && optical && <p className="meta">Radar {pct(observation.coveragePct)} of site area · optical RGB {pct(optical.coveragePercent)} of 10 m site pixel centers. Acquisitions are separately dated.</p>}
+      {(sensorSwipe || opticalMap) && !optical && !cloudyExample && <p className="meta" role="status">{sentinel.failed ? 'Optical data unavailable.' : 'Loading optical observation…'}</p>}
+      {sensorSwipe && optical && !cloudyExample && <p className="meta">Radar {pct(observation.coveragePct)} of site area · optical RGB {pct(optical.coveragePercent)} of 10 m site pixel centers. Acquisitions are separately dated.</p>}
       {opticalMap && optical && <p className="meta">{pct(opticalIndex?.coveragePercent ?? optical.coveragePercent)} usable site pixel centers · {opticalIndex?.resolutionMeters ?? optical.resolutionMeters} m posting.
         {opticalIndex?.formula && ` ${opticalLayer} (unitless, −1 to 1) · ${opticalIndex.formula}`}</p>}
+      {cloudyExample && <p className="meta">18 July UTC · Sentinel-2 at 05:15, NISAR at 13:11. Radar passed the mask across {pct(observation.coveragePct)} of the site. Sentinel-2 retained 0 of 31,160 site pixel centers at 20 m. Amber marks cloud-masked optical coverage over a reference basemap. <a href="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_44PMV_20260718_0_L2A" target="_blank" rel="noreferrer">Sentinel-2 source</a></p>}
       {radarLayer && !opticalMap && <div className="legend" aria-label="Backscatter legend">
         <p>{difference ? 'Later − earlier γ₀' : `${pol} gamma-zero (γ₀)`} · dB</p><div className={`colorbar ${difference ? 'change' : ''}`} />
         <div><span>{radarLayer.min} dB{difference && ' · weaker'}</span>{difference && <span>0 · near zero</span>}<span>{radarLayer.max} dB{difference && ' · stronger'}</span></div>
@@ -196,7 +201,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
         <p>{median === null ? 'Median unavailable' : `${db(median)} area-weighted median · ${pol}`}</p>
         <p>Native backscatter differences describe scattering. Their environmental cause remains unverified.</p>
       </div>}
-      <label className="field">Coverage<select value={footprint} onChange={event => setFootprint(event.target.value as Footprint)}>
+      <label className="field">Coverage<select disabled={cloudyExample} value={footprint} onChange={event => setFootprint(event.target.value as Footprint)}>
         <option value="off">Hidden</option><option value="valid">{comparing ? 'Common valid footprint' : 'Valid footprint'}</option>
         <option value="missing">Missing data</option>
       </select></label>
