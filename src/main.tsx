@@ -4,11 +4,9 @@ import { asset, observationDate, type Catalog, type Polarization } from './catal
 import { RadarMap, type ChangePoint } from './Map'
 import { BackscatterSwipe } from './BackscatterSwipe'
 import { RegionalSeries } from './RegionalSeries'
+import { RainfallContext, type Rainfall } from './RainfallContext'
+import type { OpticalCatalog } from './context'
 import './style.css'
-
-type Rainfall = { source: string; sourceUrl: string; windows: Record<string, {
-  total: number | null; validDays: number
-}> }
 
 function useAsset<T>(url?: string) {
   const [result, setResult] = useState<{ url: string; value: T }>()
@@ -35,9 +33,27 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   const [optical, setOptical] = useState(false)
   const [showDifference, setShowDifference] = useState(false)
   const [showCoverage, setCoverage] = useState(false)
+  const [commonCoverage, setCommonCoverage] = useState(false)
   const [showMethods, setMethods] = useState(false)
   const [showSeries, setShowSeries] = useState(false)
   const [details, setDetails] = useState<ChangePoint>()
+  const [contextType, setContextType] = useState<'reference' | 'sentinel' | 'landsat'>('reference')
+  const [contextIndex, setContextIndex] = useState(0)
+  const [opticalLayer, setOpticalLayer] = useState('rgb')
+  const [contextOpacity, setContextOpacity] = useState(.95)
+  const [waterways, setWaterways] = useState(false)
+  const [dumpyard, setDumpyard] = useState(false)
+  const [weather, setWeather] = useState(false)
+  const opticalData = useAsset<OpticalCatalog>(optical && contextType !== 'reference' ? `context/${contextType}/manifest.json` : undefined)
+  const opticalObservation = opticalData?.observations[contextIndex]
+  const indices = opticalData?.derivedProducts.filter(item =>
+    (item.kind === 'NDVI' || item.kind === 'MNDWI') && item.observationIds.includes(opticalObservation?.id ?? ''))
+  const derived = indices?.find(item => item.kind === opticalLayer)
+  const contextRaster = useMemo(() => {
+    if (!optical || contextType === 'reference' || !opticalObservation) return
+    const url = derived?.assets[derived.kind.toLowerCase()] ?? opticalObservation.assets.rgb
+    return { url, coordinates: derived?.coordinates ?? opticalObservation.coordinates }
+  }, [optical, contextType, opticalObservation, derived])
   const rain = useAsset<Rainfall>('context/rainfall.json')
   const group = catalog.groups[groupIndex]
   const pair = group.comparisons[pairIndex]
@@ -59,6 +75,7 @@ function Explorer({ catalog }: { catalog: Catalog }) {
     setDetails(point)
     setMethods(false)
     setShowSeries(false)
+    setWeather(false)
   }, [])
 
   function selectDate(index: number) {
@@ -68,20 +85,21 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   }
 
   return <main className="explorer">
-    <RadarMap site={catalog.site} layer={layer} coverage={active.coverageUrl}
+    <RadarMap site={catalog.site} layer={layer} coverage={commonCoverage ? group.footprintUrl : active.coverageUrl}
       showCoverage={showCoverage} optical={optical} points={featured}
-      onSelect={selectCandidate} selected={details} />
+      onSelect={selectCandidate} selected={details} contextRaster={contextRaster}
+      contextOpacity={contextOpacity} waterways={waterways} dumpyard={dumpyard} />
     <header className="brand floating">
       <span className="brand-icon" aria-hidden="true">≋</span>
       <div><h1>Neerthadam</h1><p>Pallikaranai Marsh · Chennai</p></div>
     </header>
     <div className="view-switch floating" aria-label="Map layers">
       <button type="button" aria-pressed={!optical} onClick={() => setOptical(false)}>NISAR imagery</button>
-      <button type="button" aria-pressed={optical} onClick={() => setOptical(true)}>Optical + infrastructure</button>
+      <button type="button" aria-pressed={optical} onClick={() => setOptical(true)}>Context</button>
     </div>
     <section className="control-card floating" aria-label="Observation controls">
       <div className="control-heading">
-        <div><h2>{difference ? 'Radar change' : 'NISAR backscatter'}</h2><p>{title}</p></div>
+        <div><h2>{optical ? 'Map context' : difference ? 'Radar change' : 'NISAR backscatter'}</h2><p>{optical ? 'Radar reference · ' : ''}{title}</p></div>
         <span className={`maturity ${group.maturity}`}>{group.maturity}</span>
       </div>
       <div className="controls">
@@ -103,21 +121,63 @@ function Explorer({ catalog }: { catalog: Catalog }) {
             onClick={() => { setPol(channel); setDetails(undefined) }}>{channel}</button>)}
         </div>
       </div>
-      {optical ? <p className="hint">Reference imagery · gold roads · cyan building footprints at closer zoom.</p> :
+      {optical ? <div className="context-options">
+        <label>Imagery<select value={contextType} onChange={event => {
+          const value = event.target.value
+          if (value === 'reference' || value === 'sentinel' || value === 'landsat') {
+            setContextType(value)
+            setContextIndex(0)
+            setOpticalLayer('rgb')
+          }
+        }}>
+          <option value="reference">Satellite reference</option>
+          <option value="sentinel">Sentinel-2 optical</option>
+          <option value="landsat">Landsat history</option>
+        </select></label>
+        {contextType !== 'reference' && !opticalObservation && <p role="status">Optical observation unavailable or loading.</p>}
+        {opticalObservation && <>
+          <label>Optical date<select value={contextIndex} onChange={event => { setContextIndex(Number(event.target.value)); setOpticalLayer('rgb') }}>
+            {opticalData?.observations.map((item, index) => <option value={index} key={item.id}>{observationDate(item.acquiredAt)}</option>)}
+          </select></label>
+          {!!indices?.length && <label>Optical layer<select value={opticalLayer}
+            onChange={event => setOpticalLayer(event.target.value)}>
+            <option value="rgb">True color</option>
+            {indices.map(item => <option key={item.id} value={item.kind}>{item.kind}</option>)}
+          </select></label>}
+          {derived && <div className="index-legend">
+            <div className={derived.kind.toLowerCase()} />
+            <p>−1 · 0 · +1 {derived.kind} (unitless)</p>
+            <p>{derived.kind === 'NDVI' ? 'Vegetation-related spectral index.' : 'Water-related spectral index.'} Interpret with imagery.</p>
+          </div>}
+          <label>Opacity<input type="range" min="0.1" max="1" step="0.05" value={contextOpacity}
+            onChange={event => setContextOpacity(Number(event.target.value))} /></label>
+          <p>{derived?.resolutionMeters ?? opticalObservation.resolutionMeters} m · {coverage(derived?.coveragePercent ?? opticalObservation.coveragePercent)} valid within site.
+            Optical and radar dates differ. Reference imagery can show through excluded pixels.</p>
+          <a href={opticalObservation.sourceUrl} target="_blank" rel="noreferrer">{opticalObservation.attribution ?? opticalObservation.sensor}</a>
+        </>}
+        <div className="infrastructure-options">
+          <label><input type="checkbox" checked={waterways} onChange={event => setWaterways(event.target.checked)} /> Mapped waterways</label>
+          <label><input type="checkbox" checked={dumpyard} onChange={event => setDumpyard(event.target.checked)} /> Dumpyard location</label>
+        </div>
+        <p>Gold roads · cyan buildings at closer zoom · blue waterways.</p>
+      </div> :
         <div className="legend"><div className={difference ? 'colorbar change' : 'colorbar'} />
           <div><span>{difference ? 'Weaker return' : 'Darker'} · {layer.min} dB</span><span>{difference ? 'Stronger return' : 'Brighter'} · {layer.max} dB</span></div></div>}
       {pair && !optical && <button className="difference-toggle" type="button" aria-pressed={difference}
         onClick={() => setShowDifference(!showDifference)}>{difference ? 'Change colors shown' : 'Show change colors'}</button>}
       <div className="card-footer">
         <button type="button" aria-pressed={showCoverage} onClick={() => setCoverage(!showCoverage)}>
-          {coverage(active.coveragePct)} site coverage
+          {coverage(commonCoverage ? group.coveragePct : active.coveragePct)} {commonCoverage ? 'shared' : difference ? 'pair' : 'site'} coverage
         </button>
-        <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined), setShowSeries(false))}>How to read this map</button>
+        <button type="button" aria-expanded={weather} onClick={() => { setWeather(!weather); setDetails(undefined); setMethods(false); setShowSeries(false) }}>Rainfall</button>
+        <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined), setShowSeries(false), setWeather(false))}>How to read this map</button>
       </div>
+      {showCoverage && <label className="coverage-option"><input type="checkbox" checked={commonCoverage}
+        onChange={event => setCommonCoverage(event.target.checked)} /> Shared coverage across series</label>}
       {pair && featured.length > 0 && earlier && later && <p className="hint">Markers show candidate changes from {day(earlier.date)} to {day(later.date)}.</p>}
     </section>
     <section className="time-card floating" aria-label="Map time slider">
-      <div className="time-heading"><strong>Acquisition timeline</strong><button type="button" aria-expanded={showSeries} onClick={() => { setShowSeries(!showSeries); setDetails(undefined); setMethods(false) }}>Regional chart</button></div>
+      <div className="time-heading"><strong>Acquisition timeline</strong><button type="button" aria-expanded={showSeries} onClick={() => { setShowSeries(!showSeries); setDetails(undefined); setMethods(false); setWeather(false) }}>Regional chart</button></div>
       <input type="range" min={0} max={group.observations.length - 1} step={1} value={dateIndex}
         disabled={group.observations.length < 2}
         aria-label="NISAR acquisition date" aria-valuetext={observationDate(observation.date)}
@@ -128,6 +188,10 @@ function Explorer({ catalog }: { catalog: Catalog }) {
         <span>{day(group.observations.at(-1)!.date)}</span>
       </div>
     </section>
+    {weather && <aside className="info-card floating" aria-label="Rainfall context">
+      <button type="button" className="close" aria-label="Close rainfall" onClick={() => setWeather(false)}>×</button>
+      <RainfallContext rain={rain} dates={difference && earlier && later ? [earlier.date, later.date] : [observation.date]} />
+    </aside>}
     {showSeries && <aside className="info-card floating" aria-label="Regional chart">
       <button type="button" className="close" aria-label="Close regional chart" onClick={() => setShowSeries(false)}>×</button>
       <RegionalSeries group={group} pol={pol} selected={dateIndex} onSelect={selectDate} />
@@ -153,14 +217,7 @@ function Explorer({ catalog }: { catalog: Catalog }) {
       {earlier && later && <BackscatterSwipe key={details.pixel_centroid_lon_lat.join(',')}
         before={earlier.layers[pol]} after={later.layers[pol]} center={details.pixel_centroid_lon_lat}
         beforeDate={earlier.date} afterDate={later.date} channel={pol} />}
-      <h3>Rainfall near Pallikaranai</h3>
-      {dates.map(date => {
-        const window = rain?.windows[date.slice(0, 10)]
-        return <div className="rain-row" key={date}><span>Before {day(date)}</span>
-          <strong>{window?.total == null ? 'Unavailable' : `${window.total.toFixed(1)} mm`}</strong></div>
-      })}
-      <p>Seven complete UTC days before each image. Gridded rainfall gives context across the marsh vicinity.</p>
-      {rain && <a href={rain.sourceUrl} target="_blank" rel="noreferrer">{rain.source}</a>}
+      <RainfallContext rain={rain} dates={dates} />
       <p>Physical cause remains unverified.</p>
       <button type="button" onClick={() => setOptical(!optical)}>{optical ? 'Return to radar' : 'See nearby roads and buildings'}</button>
     </aside>}

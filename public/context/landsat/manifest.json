@@ -1,0 +1,126 @@
+{
+  "observations": [
+    {
+      "id": "LE07_L2SP_142051_20000130_02_T1",
+      "sensor": "Landsat",
+      "acquiredAt": "2000-01-30T04:51:18.636550Z",
+      "productId": "LE07_L2SP_142051_20000130_20200918_02_T1",
+      "platform": "landsat-7",
+      "sourceUrl": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LE07_L2SP_142051_20000130_02_T1",
+      "crs": "EPSG:3857",
+      "nativeCrs": "EPSG:32644",
+      "resolutionMeters": 30,
+      "coveragePercent": 92.59,
+      "tileCloudPercent": 3.0,
+      "validPixelCount": 12824,
+      "sitePixelCount": 13851,
+      "coordinates": [
+        [
+          80.20820178693904,
+          12.968314894845895
+        ],
+        [
+          80.24323608301971,
+          12.968314894845895
+        ],
+        [
+          80.24323608301971,
+          12.876643341304607
+        ],
+        [
+          80.20820178693904,
+          12.876643341304607
+        ]
+      ],
+      "qualityFlags": [
+        "Single Landsat Collection 2 Level-2 surface reflectance observation",
+        "QA_PIXEL and QA_RADSAT applied; coverage uses native 30 m cell centers",
+        "Present-day Ramsar boundary used for clipping on both dates"
+      ],
+      "sourceAssets": {
+        "qa_pixel": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/etm/2000/142/051/LE07_L2SP_142051_20000130_20200918_02_T1/LE07_L2SP_142051_20000130_20200918_02_T1_QA_PIXEL.TIF",
+        "qa_radsat": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/etm/2000/142/051/LE07_L2SP_142051_20000130_20200918_02_T1/LE07_L2SP_142051_20000130_20200918_02_T1_QA_RADSAT.TIF",
+        "red": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/etm/2000/142/051/LE07_L2SP_142051_20000130_20200918_02_T1/LE07_L2SP_142051_20000130_20200918_02_T1_SR_B3.TIF",
+        "green": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/etm/2000/142/051/LE07_L2SP_142051_20000130_20200918_02_T1/LE07_L2SP_142051_20000130_20200918_02_T1_SR_B2.TIF",
+        "blue": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/etm/2000/142/051/LE07_L2SP_142051_20000130_20200918_02_T1/LE07_L2SP_142051_20000130_20200918_02_T1_SR_B1.TIF"
+      },
+      "assets": {
+        "rgb": "context/landsat/2000-01-30-rgb.png"
+      },
+      "attribution": "USGS/NASA Landsat Collection 2, via Microsoft Planetary Computer"
+    },
+    {
+      "id": "LC08_L2SP_142051_20250211_02_T1",
+      "sensor": "Landsat",
+      "acquiredAt": "2025-02-11T04:58:31.643688Z",
+      "productId": "LC08_L2SP_142051_20250211_20250215_02_T1",
+      "platform": "landsat-8",
+      "sourceUrl": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_142051_20250211_02_T1",
+      "crs": "EPSG:3857",
+      "nativeCrs": "EPSG:32644",
+      "resolutionMeters": 30,
+      "coveragePercent": 97.86,
+      "tileCloudPercent": 2.95,
+      "validPixelCount": 13554,
+      "sitePixelCount": 13851,
+      "coordinates": [
+        [
+          80.20820178693904,
+          12.968314894845895
+        ],
+        [
+          80.24323608301971,
+          12.968314894845895
+        ],
+        [
+          80.24323608301971,
+          12.876643341304607
+        ],
+        [
+          80.20820178693904,
+          12.876643341304607
+        ]
+      ],
+      "qualityFlags": [
+        "Single Landsat Collection 2 Level-2 surface reflectance observation",
+        "QA_PIXEL and QA_RADSAT applied; coverage uses native 30 m cell centers",
+        "Present-day Ramsar boundary used for clipping on both dates"
+      ],
+      "sourceAssets": {
+        "qa_pixel": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2025/142/051/LC08_L2SP_142051_20250211_20250215_02_T1/LC08_L2SP_142051_20250211_20250215_02_T1_QA_PIXEL.TIF",
+        "qa_radsat": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2025/142/051/LC08_L2SP_142051_20250211_20250215_02_T1/LC08_L2SP_142051_20250211_20250215_02_T1_QA_RADSAT.TIF",
+        "red": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2025/142/051/LC08_L2SP_142051_20250211_20250215_02_T1/LC08_L2SP_142051_20250211_20250215_02_T1_SR_B4.TIF",
+        "green": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2025/142/051/LC08_L2SP_142051_20250211_20250215_02_T1/LC08_L2SP_142051_20250211_20250215_02_T1_SR_B3.TIF",
+        "blue": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2025/142/051/LC08_L2SP_142051_20250211_20250215_02_T1/LC08_L2SP_142051_20250211_20250215_02_T1_SR_B2.TIF"
+      },
+      "assets": {
+        "rgb": "context/landsat/2025-02-11-rgb.png"
+      },
+      "attribution": "USGS/NASA Landsat Collection 2, via Microsoft Planetary Computer"
+    }
+  ],
+  "derivedProducts": [
+    {
+      "id": "LE07_L2SP_142051_20000130_02_T1-rgb",
+      "kind": "cloud-masked-rgb",
+      "observationIds": [
+        "LE07_L2SP_142051_20000130_02_T1"
+      ],
+      "assets": {
+        "rgb": "context/landsat/2000-01-30-rgb.png"
+      },
+      "method": "Surface reflectance = DN \u00d7 0.0000275 \u2212 0.2; shared 0.02\u20130.30 RGB stretch"
+    },
+    {
+      "id": "LC08_L2SP_142051_20250211_02_T1-rgb",
+      "kind": "cloud-masked-rgb",
+      "observationIds": [
+        "LC08_L2SP_142051_20250211_02_T1"
+      ],
+      "assets": {
+        "rgb": "context/landsat/2025-02-11-rgb.png"
+      },
+      "method": "Surface reflectance = DN \u00d7 0.0000275 \u2212 0.2; shared 0.02\u20130.30 RGB stretch"
+    }
+  ]
+}

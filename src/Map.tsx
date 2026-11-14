@@ -1,3 +1,4 @@
+import type { ContextRaster } from './context'
 import { useEffect, useRef, useState } from 'react'
 import maplibre, { type StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -33,6 +34,7 @@ type Props = {
   site: Catalog['site']; layer: Layer; coverage: string; showCoverage: boolean
   optical: boolean; points: ChangePoint[]; selected?: ChangePoint
   onSelect: (point: ChangePoint) => void
+  contextRaster?: ContextRaster; contextOpacity: number; waterways: boolean; dumpyard: boolean
 }
 
 function sitePadding() {
@@ -41,7 +43,7 @@ function sitePadding() {
     : { top: 76, bottom: 40, left: 365, right: 92 }
 }
 
-export function RadarMap({ site, layer, coverage, showCoverage, optical, points, selected, onSelect }: Props) {
+export function RadarMap({ site, layer, coverage, showCoverage, optical, points, selected, onSelect, contextRaster, contextOpacity, waterways, dumpyard }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<maplibre.Map | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -93,6 +95,8 @@ export function RadarMap({ site, layer, coverage, showCoverage, optical, points,
         filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor']]], layout: { visibility: 'none' },
         paint: { 'line-color': '#ffdb89', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 17, 3],
           'line-opacity': .92 } })
+      view.addLayer({ id: 'waterways', type: 'line', source: 'infrastructure', 'source-layer': 'waterway',
+        layout: { visibility: 'none' }, paint: { 'line-color': '#7ccaff', 'line-width': 2 } })
       setLoaded(true)
     })
     return () => {
@@ -123,6 +127,55 @@ export function RadarMap({ site, layer, coverage, showCoverage, optical, points,
     view.setPaintProperty('satellite', 'raster-brightness-max', optical ? 1 : .8)
     for (const id of ['roads', 'buildings']) view.setLayoutProperty(id, 'visibility', optical ? 'visible' : 'none')
   }, [layer, optical, loaded])
+
+  useEffect(() => {
+    const view = map.current
+    if (!loaded || !view) return
+    view.setLayoutProperty('waterways', 'visibility', optical && waterways ? 'visible' : 'none')
+    if (!optical || !dumpyard) return
+    const pin = document.createElement('button')
+    pin.className = 'infrastructure-pin'
+    pin.type = 'button'
+    pin.textContent = 'Dumpyard'
+    const content = document.createElement('div')
+    const title = document.createElement('strong')
+    title.textContent = 'Pallikaranai Dumpyard'
+    const note = document.createElement('p')
+    note.textContent = 'Approximate location based on OpenStreetMap way 84106307 (edited July 29, 2026).'
+    const link = document.createElement('a')
+    link.href = 'https://www.openstreetmap.org/way/84106307'
+    link.textContent = 'OpenStreetMap feature'
+    link.target = '_blank'
+    link.rel = 'noreferrer'
+    content.append(title, note, link)
+    const marker = new maplibre.Marker({ element: pin }).setLngLat([80.226167, 12.954443])
+      .setPopup(new maplibre.Popup({ offset: 18 }).setDOMContent(content)).addTo(view)
+    return () => { marker.remove() }
+  }, [loaded, optical, waterways, dumpyard])
+
+  useEffect(() => {
+    const view = map.current
+    if (!loaded || !view) return
+    const current = view.getSource<maplibre.ImageSource>('context-raster')
+    if (!contextRaster) {
+      if (current) view.setLayoutProperty('context-raster', 'visibility', 'none')
+      return
+    }
+    const image = { url: asset(contextRaster.url), coordinates: contextRaster.coordinates }
+    if (current) current.updateImage(image)
+    else {
+      view.addSource('context-raster', { type: 'image', ...image })
+      view.addLayer({ id: 'context-raster', type: 'raster', source: 'context-raster',
+        paint: { 'raster-resampling': 'nearest', 'raster-fade-duration': 0 }
+      }, 'site-outline-shadow')
+    }
+    view.setLayoutProperty('context-raster', 'visibility', 'visible')
+  }, [loaded, contextRaster])
+
+  useEffect(() => {
+    const view = map.current
+    if (loaded && view?.getLayer('context-raster')) view.setPaintProperty('context-raster', 'raster-opacity', contextOpacity)
+  }, [loaded, contextRaster, contextOpacity])
 
   useEffect(() => {
     const view = map.current

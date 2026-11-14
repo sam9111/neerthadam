@@ -1,0 +1,158 @@
+{
+  "observations": [
+    {
+      "id": "S2A_44PMV_20260715_0_L2A",
+      "sensor": "Sentinel-2",
+      "acquiredAt": "2026-07-15T05:02:41.024000Z",
+      "tileAcquiredAt": "2026-07-15T05:15:29.390000Z",
+      "productId": "S2A_MSIL2A_20260715T050241_N0512_R119_T44PMV_20260715T100502",
+      "sourceUrl": "https://stac.dataspace.copernicus.eu/v1/collections/sentinel-2-l2a/items/S2A_MSIL2A_20260715T050241_N0512_R119_T44PMV_20260715T100502",
+      "assetSourceUrl": "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_44PMV_20260715_0_L2A",
+      "processingVersion": "05.12",
+      "crs": "EPSG:3857",
+      "resolutionMeters": 10,
+      "coveragePercent": 86.02,
+      "tileCloudPercent": 0.84,
+      "qualityFlags": [
+        "Single Level-2A observation",
+        "TCI RGB, 10 m source posting",
+        "20 m SCL classes 4, 5 and 6 retained",
+        "Outside site and other SCL classes transparent",
+        "Coverage based on native 10 m pixel centers inside Ramsar Site 2481"
+      ],
+      "sourceAssets": {
+        "visual": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/44/P/MV/2026/7/S2A_44PMV_20260715_0_L2A/TCI.tif",
+        "scl": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/44/P/MV/2026/7/S2A_44PMV_20260715_0_L2A/SCL.tif"
+      },
+      "sceneClassificationCounts": {
+        "4": 45661,
+        "5": 55658,
+        "6": 6056,
+        "7": 17365
+      },
+      "validPixelCount": 107304,
+      "sitePixelCount": 124740,
+      "coordinates": [
+        [
+          80.20789797126476,
+          12.968373639715853
+        ],
+        [
+          80.24330759608854,
+          12.968373639715853
+        ],
+        [
+          80.24330759608854,
+          12.87658037957524
+        ],
+        [
+          80.20789797126476,
+          12.87658037957524
+        ]
+      ],
+      "assets": {
+        "rgb": "context/sentinel/2026-07-15-rgb.png",
+        "valid_mask": "context/sentinel/2026-07-15-valid.tif"
+      },
+      "attribution": "Contains modified Copernicus Sentinel data 2026, via Element 84 Earth Search"
+    }
+  ],
+  "derivedProducts": [
+    {
+      "id": "S2A_44PMV_20260715_0_L2A-rgb-scl",
+      "kind": "cloud-masked-rgb",
+      "observationIds": [
+        "S2A_44PMV_20260715_0_L2A"
+      ],
+      "assets": {
+        "rgb": "context/sentinel/2026-07-15-rgb.png",
+        "valid_mask": "context/sentinel/2026-07-15-valid.tif"
+      },
+      "method": "Level-2A TCI masked using nearest-neighbor SCL classes 4, 5 and 6"
+    },
+    {
+      "id": "S2A_44PMV_20260715_0_L2A-ndvi",
+      "kind": "NDVI",
+      "observationIds": [
+        "S2A_44PMV_20260715_0_L2A"
+      ],
+      "resolutionMeters": 10,
+      "coveragePercent": 86.08,
+      "coordinates": [
+        [
+          80.20789797126476,
+          12.968373639715853
+        ],
+        [
+          80.24330759608854,
+          12.968373639715853
+        ],
+        [
+          80.24330759608854,
+          12.87658037957524
+        ],
+        [
+          80.20789797126476,
+          12.87658037957524
+        ]
+      ],
+      "assets": {
+        "ndvi": "context/sentinel/2026-07-15-ndvi.png"
+      },
+      "range": [
+        -1,
+        1
+      ],
+      "colorMap": "BrBG",
+      "formula": "(B08 \u2212 B04) / (B08 + B04)",
+      "method": "Sentinel-2 L2A bottom-of-atmosphere reflectance; SCL classes 4, 5, 6 kept",
+      "sourceAssets": {
+        "nir": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/44/P/MV/2026/7/S2A_44PMV_20260715_0_L2A/B08.tif",
+        "red": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/44/P/MV/2026/7/S2A_44PMV_20260715_0_L2A/B04.tif"
+      },
+      "radiometry": "For the verified tile, four paired COG/JP2 spot checks per band showed COG DN = original DN \u2212 1000; COG DN scaled by 0.0001."
+    },
+    {
+      "id": "S2A_44PMV_20260715_0_L2A-mndwi",
+      "kind": "MNDWI",
+      "observationIds": [
+        "S2A_44PMV_20260715_0_L2A"
+      ],
+      "resolutionMeters": 20,
+      "coveragePercent": 86.07,
+      "coordinates": [
+        [
+          80.20780577609446,
+          12.968373639715853
+        ],
+        [
+          80.24321527154535,
+          12.968373639715853
+        ],
+        [
+          80.24321527154535,
+          12.876580715013471
+        ],
+        [
+          80.20780577609446,
+          12.876580715013471
+        ]
+      ],
+      "assets": {
+        "mndwi": "context/sentinel/2026-07-15-mndwi.png"
+      },
+      "range": [
+        -1,
+        1
+      ],
+      "colorMap": "PuOr_r",
+      "formula": "(B03 \u2212 B11) / (B03 + B11)",
+      "method": "Sentinel-2 L2A bottom-of-atmosphere reflectance; SCL classes 4, 5, 6 kept; green averaged to 20 m SWIR grid",
+      "sourceAssets": {
+        "green": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/44/P/MV/2026/7/S2A_44PMV_20260715_0_L2A/B03.tif",
+        "swir16": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/44/P/MV/2026/7/S2A_44PMV_20260715_0_L2A/B11.tif"
+      },
+      "radiometry": "For the verified tile, four paired COG/JP2 spot checks per band showed COG DN = original DN \u2212 1000; COG DN scaled by 0.0001."
+    }
+  ]
+}
