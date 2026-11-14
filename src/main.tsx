@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { asset, observationDate, type Catalog, type LonLat, type Polarization } from './catalog'
+import { asset, observationDate, type Catalog, type LonLat } from './catalog'
 import { RadarMap } from './Map'
 import { Measurements, db, type SampleCatalog } from './Inspection'
 import { RainfallContext, type Rainfall } from './RainfallContext'
@@ -10,6 +10,7 @@ import './style.css'
 
 type Mode = 'Observe' | 'Compare' | 'Investigate'
 type Display = 'radar' | 'reference' | 'swipe' | 'difference' | 'optical' | 'sensor-swipe'
+type CompositeCatalog = { ranges: Record<'red' | 'green' | 'blue', [number, number]>; groups: Record<string, Record<string, ContextRaster>> }
 type Footprint = 'off' | 'valid' | 'missing'
 const seenKey = 'neerthadam-evidence-tour-v1'
 const pct = (value: number) => `${Number(value.toFixed(2))}%`
@@ -44,7 +45,6 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const [groupIndex, setGroup] = useState(defaultGroup)
   const [dateIndex, setDate] = useState(0)
   const [pairIndex, setPair] = useState(0)
-  const [pol, setPol] = useState<Polarization>('HH')
   const [footprint, setFootprint] = useState<Footprint>('off')
   const [opacity, setOpacity] = useState(1)
   const [location, setLocation] = useState<LonLat>()
@@ -55,14 +55,18 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const cloudy = useAsset<ContextRaster & { source: string }>('context/sentinel/2026-07-18-cloudy-rgb.json')
   const rainfall = useAsset<Rainfall>('context/rainfall.json')
   const samples = useAsset<SampleCatalog>('data/samples.json')
+  const composites = useAsset<CompositeCatalog>('data/composites.json')
   const group = catalog.groups[groupIndex]
+  const images = composites.value?.groups[group.id]
   const observation = group.observations[dateIndex]
   const pair = group.comparisons[pairIndex]
   const earlier = group.observations.find(item => item.id === pair?.earlierId)
   const later = group.observations.find(item => item.id === pair?.laterId)
-  const comparable = Boolean(pair && earlier && later && earlier.layers[pol].min === later.layers[pol].min &&
-    earlier.layers[pol].max === later.layers[pol].max)
+  const comparable = Boolean(pair && earlier && later)
   const comparing = mode === 'Compare' && comparable
+  const observedComposite = images?.[observation.id]
+  const earlierComposite = earlier && images?.[earlier.id]
+  const laterComposite = later && images?.[later.id]
   const optical = sentinel.value?.observations[0]
   const opticalIndex = sentinel.value?.derivedProducts.find(item => item.kind === opticalLayer)
   const sensorSwipe = display === 'sensor-swipe'
@@ -72,18 +76,20 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const cloudyExample = step === 1 && observation.date.startsWith('2026-07-18')
   const showCloudImage = cloudyExample && sensorSwipe
   const difference = comparing && display === 'difference'
-  const radarLayer = difference ? pair.layers[pol] : comparing ? later?.layers[pol] : observation.layers[pol]
+  const differenceLayer = difference ? pair.layers.HH : undefined
+  const compositeLayer = comparing ? laterComposite : observedComposite
+  const radarLayer = differenceLayer ?? compositeLayer
   const opticalRaster = useMemo(() => optical ? {
     url: opticalIndex?.assets[opticalLayer.toLowerCase()] ?? optical.assets.rgb,
     coordinates: opticalIndex?.coordinates ?? optical.coordinates,
   } : undefined, [optical, opticalIndex, opticalLayer])
   const raster = showCloudImage ? cloudy.value ?? radarLayer : display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
-  const swipe = comparing && display === 'swipe' && earlier && later ? {
-    raster: earlier.layers[pol], left: shortDate(earlier.date), right: shortDate(later.date),
-  } : showCloudImage && cloudy.value ? {
-    raster: observation.layers[pol], left: 'NISAR · 13:11 UTC', right: 'Sentinel-2 · 05:15 UTC',
-  } : sensorSwipe && optical && !cloudyExample ? {
-    raster: observation.layers[pol], left: `NISAR · ${shortDate(observation.date)}`,
+  const swipe = comparing && display === 'swipe' && earlier && later && earlierComposite && laterComposite ? {
+    raster: earlierComposite, left: shortDate(earlier.date), right: shortDate(later.date),
+  } : showCloudImage && cloudy.value && observedComposite ? {
+    raster: observedComposite, left: 'NISAR · 13:11 UTC', right: 'Sentinel-2 · 05:15 UTC',
+  } : sensorSwipe && optical && observedComposite && !cloudyExample ? {
+    raster: observedComposite, left: `NISAR · ${shortDate(observation.date)}`,
     right: `Sentinel-2 · ${shortDate(optical.acquiredAt)}`,
   } : undefined
   const observedSupport = comparing ? pair : observation
@@ -93,7 +99,8 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const coverage = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-coverage.geojson` : radarCoverage
   const missing = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-missing.geojson` : radarMissing
   const measured = useMemo(() => comparing && earlier && later ? [earlier, later] : [observation], [comparing, earlier, later, observation])
-  const median = comparing ? pair.fixedFootprint[pol].median : null
+  const inspected = useMemo(() => mode === 'Investigate' && comparable && earlier && later ? [earlier, later] : measured,
+    [mode, comparable, earlier, later, measured])
 
   function chooseMode(next: Mode) {
     setMode(next)
@@ -107,7 +114,6 @@ function Workspace({ catalog }: { catalog: Catalog }) {
     setGroup(defaultGroup)
     setDate(next === 1 || next === 3 ? Math.min(1, catalog.groups[defaultGroup].observations.length - 1) : 0)
     setPair(0)
-    setPol('HH')
     setOpacity(1)
     setOpticalLayer('rgb')
     setInfrastructure(next === 0 || next === 4)
@@ -173,13 +179,11 @@ function Workspace({ catalog }: { catalog: Catalog }) {
             return <option key={item.earlierId + item.laterId} value={index}>{one && shortDate(one.date)} – {two && shortDate(two.date)}</option>
           })}
         </select>}
-        <div className="polar" aria-label="Polarization">{(['HH', 'HV'] as const).map(channel =>
-          <button key={channel} type="button" aria-pressed={pol === channel} onClick={() => setPol(channel)}>{channel}</button>)}</div>
       </div>
       {mode === 'Compare' && !comparable && <p className="meta" role="status">Comparison unavailable. Dates must share a verified acquisition group, grid and display scale.</p>}
       {comparing && <div className="toggle-row">
         <button type="button" aria-pressed={!difference} onClick={() => setDisplay('swipe')}>Swipe</button>
-        <button type="button" aria-pressed={difference} onClick={() => setDisplay('difference')}>Difference</button>
+        <button type="button" aria-pressed={difference} onClick={() => setDisplay('difference')}>HH difference</button>
       </div>}
       {mode === 'Investigate' && !cloudyExample && <div className="toggle-row">
         <button type="button" aria-pressed={display === 'radar'} onClick={() => setDisplay('radar')}>Radar</button>
@@ -197,12 +201,25 @@ function Workspace({ catalog }: { catalog: Catalog }) {
         {opticalIndex?.formula && ` ${opticalLayer} (unitless, −1 to 1) · ${opticalIndex.formula}`}</p>}
       {cloudyExample && <p className="meta">18 July UTC · Sentinel-2 at 05:15, NISAR at 13:11. Radar passed the mask across {pct(observation.coveragePct)} of the site. Sentinel-2 retained 0 of 31,160 site pixel centers at 20 m. Every tested center was classified as high-probability cloud in the Sentinel-2 Scene Classification Layer. This unmasked RGB view uses a shared contrast stretch of the actual visible bands to reveal cloud detail. The cloud classification is a separate quality result. <a href="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_44PMV_20260718_0_L2A" target="_blank" rel="noreferrer">Sentinel-2 source</a>{cloudy.value && <> · <a href={cloudy.value.source} target="_blank" rel="noreferrer">Red band source</a></>}</p>}
       {showCloudImage && !cloudy.value && <p role="status">{cloudy.failed ? "Sentinel-2 image unavailable." : "Loading Sentinel-2 true color…"}</p>}
-      {radarLayer && !opticalMap && <div className="legend" aria-label="Backscatter legend">
-        <p>{difference ? 'Later − earlier γ₀' : `${pol} gamma-zero (γ₀)`} · dB</p><div className={`colorbar ${difference ? 'change' : ''}`} />
-        <div><span>{radarLayer.min} dB{difference && ' · weaker'}</span>{difference && <span>0 · near zero</span>}<span>{radarLayer.max} dB{difference && ' · stronger'}</span></div>
+      {!opticalMap && !difference && <>
+        {!compositeLayer && <p role="status" className="meta">{composites.failed || composites.value ? 'Radar composite unavailable.' : 'Loading radar composite…'}</p>}
+        {composites.value && <details className="layer-details radar-legend">
+          <summary>How to read this image</summary>
+          <p>False-color gamma-zero backscatter. Colors encode scattering characteristics and can vary with moisture, roughness, vegetation structure and noise. Land-cover interpretation requires independent evidence.</p>
+          <ul>{([['red', 'HH'], ['green', 'HV'], ['blue', 'HH − HV']] as const).map(([color, channel]) =>
+            <li key={color}><strong>{color}</strong> · {channel} · {composites.value!.ranges[color].join(' to ')} dB</li>)}</ul>
+          <p>Each channel uses the same clipped linear scale across dates. Transparent pixels lack valid HH or HV. Weak HV can be noise-sensitive, especially in the blue contrast; the display uses the source masks and applies no additional noise-floor screen.</p>
+        </details>}
+      </>}
+      {differenceLayer && <div className="legend" aria-label="HH backscatter difference legend">
+        <p>HH gamma-zero · later − earlier · dB</p><div className="colorbar change" />
+        <div><span>{differenceLayer.min} dB · weaker</span><span>0 · near zero</span><span>{differenceLayer.max} dB · stronger</span></div>
       </div>}
       {comparing && <div className="summary" aria-live="polite"><strong>{pct(pair.coveragePct)} common valid site area</strong>
-        <p>{median === null ? 'Median unavailable' : `${db(median)} area-weighted median · ${pol}`}</p>
+        <p>Area-weighted medians · {(['HH', 'HV'] as const).map(channel => {
+          const median = pair.fixedFootprint[channel].median
+          return `${channel} ${median === null ? 'unavailable' : db(median)}`
+        }).join(' · ')}</p>
         <p>Native backscatter differences describe scattering. Their environmental cause remains unverified.</p>
       </div>}
       {!cloudyExample && <label className="field">Coverage<select value={footprint} onChange={event => setFootprint(event.target.value as Footprint)}>
@@ -237,14 +254,14 @@ function Workspace({ catalog }: { catalog: Catalog }) {
       <h3>Observations</h3>
       {location ? <>
         <p>{location[1].toFixed(5)}° N · {location[0].toFixed(5)}° E · {group.maturity} · L-band {group.frequency} · {group.spacingM} m</p>
-        {samples.value || samples.failed ? <Measurements key={`${location.join(',')}:${group.id}:${measured.map(item => item.id).join(',')}`}
-          point={location} observations={measured} samples={samples.value?.[group.id]} /> : <p>Loading measurement catalog…</p>}
-        <p>Native gamma-zero in dB. NoData marks locations without a usable sample in the exported raster. A difference requires valid values for that channel on both dates.</p>
+        {samples.value || samples.failed ? <Measurements key={`${location.join(',')}:${group.id}:${inspected.map(item => item.id).join(',')}`}
+          point={location} observations={inspected} samples={samples.value?.[group.id]} /> : <p>Loading measurement catalog…</p>}
+        <p>Native gamma-zero in dB. NoData marks locations without a usable sample in the exported raster. HH − HV needs both channels at that date. Temporal differences require valid inputs at both dates. Weak HV can be close to the noise floor, making contrast less reliable.</p>
       </> : <p>Click the map to inspect native HH/HV measurements.</p>}
       <h3>Environmental context</h3>
       {optical && <p><a href={optical.sourceUrl} target="_blank" rel="noreferrer">Sentinel-2 L2A · {observationDate(optical.acquiredAt)}</a>.
         RGB retains SCL classes 4, 5 and 6. Cloud, shadow and other excluded classes appear transparent. Optical reflectance supports spectral indices, while active radar measures scattering through most clouds, day or night.</p>}
-      <RainfallContext rain={rainfall.value} dates={measured.map(item => item.date)} />
+      <RainfallContext rain={rainfall.value} dates={(location ? inspected : measured).map(item => item.date)} />
       {group.notes.slice(1).map(note => <p key={note}>{note}</p>)}
       <p>Gold roads and blue waterways show mapped geographic context when enabled. The ivory outline shows the Ramsar designation.</p>
       <h3>Interpretation</h3>

@@ -54,14 +54,13 @@ export function Measurements({ point, observations, samples }: {
   if (!samples) return <p role="status">Measurement catalog unavailable.</p>
   if (!result) return <p role="status">Loading native measurements…</p>
   const format = (value?: number) => value !== undefined && Number.isFinite(value) ? db(value) : 'NoData'
-  const difference = (channel: 0 | 1) => {
-    const before = result[0]?.[channel]
-    const after = result[1]?.[channel]
+  const contrast = (value?: Values) => value ? value[0] - value[1] : undefined
+  const difference = (before?: number, after?: number) => {
     return before !== undefined && after !== undefined ? format(after - before) : 'NoData'
   }
-  return <table className="measurements"><thead><tr><th scope="col">UTC date</th><th scope="col">HH</th><th scope="col">HV</th></tr></thead>
+  return <table className="measurements"><thead><tr><th scope="col">UTC date</th><th scope="col">HH</th><th scope="col">HV</th><th scope="col">HH − HV</th></tr></thead>
     <tbody>{observations.map((item, index) => <tr key={item.id}><th scope="row">{observationDate(item.date)}</th>
-      <td>{format(result[index]?.[0])}</td><td>{format(result[index]?.[1])}</td></tr>)}
-      {observations.length === 2 && <tr><th scope="row">Later − earlier</th><td>{difference(0)}</td><td>{difference(1)}</td></tr>}
+      <td>{format(result[index]?.[0])}</td><td>{format(result[index]?.[1])}</td><td>{format(contrast(result[index]))}</td></tr>)}
+      {observations.length === 2 && <tr><th scope="row">Later − earlier</th><td>{difference(result[0]?.[0], result[1]?.[0])}</td><td>{difference(result[0]?.[1], result[1]?.[1])}</td><td>{difference(contrast(result[0]), contrast(result[1]))}</td></tr>}
     </tbody></table>
 }
