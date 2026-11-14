@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { asset, observationDate, type Catalog, type Polarization } from './catalog'
 import { RadarMap, type ChangePoint } from './Map'
 import { BackscatterSwipe } from './BackscatterSwipe'
+import { RegionalSeries } from './RegionalSeries'
 import './style.css'
 
 type Rainfall = { source: string; sourceUrl: string; windows: Record<string, {
@@ -35,6 +36,7 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   const [showDifference, setShowDifference] = useState(false)
   const [showCoverage, setCoverage] = useState(false)
   const [showMethods, setMethods] = useState(false)
+  const [showSeries, setShowSeries] = useState(false)
   const [details, setDetails] = useState<ChangePoint>()
   const rain = useAsset<Rainfall>('context/rainfall.json')
   const group = catalog.groups[groupIndex]
@@ -56,7 +58,14 @@ function Explorer({ catalog }: { catalog: Catalog }) {
   const selectCandidate = useCallback((point: ChangePoint) => {
     setDetails(point)
     setMethods(false)
+    setShowSeries(false)
   }, [])
+
+  function selectDate(index: number) {
+    setDateIndex(index)
+    setOptical(false)
+    setShowDifference(false)
+  }
 
   return <main className="explorer">
     <RadarMap site={catalog.site} layer={layer} coverage={active.coverageUrl}
@@ -103,22 +112,26 @@ function Explorer({ catalog }: { catalog: Catalog }) {
         <button type="button" aria-pressed={showCoverage} onClick={() => setCoverage(!showCoverage)}>
           {coverage(active.coveragePct)} site coverage
         </button>
-        <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined))}>How to read this map</button>
+        <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined), setShowSeries(false))}>How to read this map</button>
       </div>
       {pair && featured.length > 0 && earlier && later && <p className="hint">Markers show candidate changes from {day(earlier.date)} to {day(later.date)}.</p>}
     </section>
     <section className="time-card floating" aria-label="Map time slider">
-      <div className="time-heading"><strong>Acquisition timeline</strong><span>{observationDate(observation.date)}</span></div>
+      <div className="time-heading"><strong>Acquisition timeline</strong><button type="button" aria-expanded={showSeries} onClick={() => { setShowSeries(!showSeries); setDetails(undefined); setMethods(false) }}>Regional chart</button></div>
       <input type="range" min={0} max={group.observations.length - 1} step={1} value={dateIndex}
         disabled={group.observations.length < 2}
         aria-label="NISAR acquisition date" aria-valuetext={observationDate(observation.date)}
-        onChange={event => { setDateIndex(Number(event.target.value)); setOptical(false); setShowDifference(false) }} />
+        onChange={event => selectDate(Number(event.target.value))} />
       <div className="time-dates">
         <span>{day(group.observations[0].date)}</span>
         <span>{group.observations.length} observations</span>
         <span>{day(group.observations.at(-1)!.date)}</span>
       </div>
     </section>
+    {showSeries && <aside className="info-card floating" aria-label="Regional chart">
+      <button type="button" className="close" aria-label="Close regional chart" onClick={() => setShowSeries(false)}>×</button>
+      <RegionalSeries group={group} pol={pol} selected={dateIndex} onSelect={selectDate} />
+    </aside>}
     {showMethods && <aside className="info-card floating" aria-label="Map methods">
       <button type="button" className="close" aria-label="Close methods" onClick={() => setMethods(false)}>×</button>
       <h2>How to read this map</h2>
