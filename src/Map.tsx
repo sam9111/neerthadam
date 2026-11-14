@@ -1,8 +1,8 @@
-import type { ContextRaster } from './context'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
 import maplibre, { type StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { asset, type Catalog, type Layer, type Polarization } from './catalog'
+import { asset, type Catalog, type LonLat } from './catalog'
+import type { ContextRaster } from './context'
 
 const style: StyleSpecification = {
   version: 8,
@@ -22,212 +22,217 @@ const style: StyleSpecification = {
   ],
 }
 
-export type ChangePoint = {
-  polarization: Polarization
-  pixel_centroid_lon_lat: [number, number]
-  median_change_db: number
-  site_area_ha: number
-  tail: 'upper' | 'lower'
-}
+type Swipe = { raster: ContextRaster; left: string; right: string }
 
 type Props = {
-  site: Catalog['site']; layer: Layer; coverage: string; showCoverage: boolean
-  optical: boolean; points: ChangePoint[]; selected?: ChangePoint
-  onSelect: (point: ChangePoint) => void
-  contextRaster?: ContextRaster; contextOpacity: number; waterways: boolean; dumpyard: boolean
+  site: Catalog['site']; raster?: ContextRaster; optical: boolean; opacity: number
+  coverage?: string; missing?: string; swipe?: Swipe
+  leftCoverage?: string; leftMissing?: string
+  selected?: LonLat; onInspect: (point: LonLat) => void
+  infrastructure: boolean
 }
 
-function sitePadding() {
+function padding() {
   return window.innerWidth < 720
-    ? { top: 75, bottom: 240, left: 24, right: 24 }
-    : { top: 76, bottom: 40, left: 365, right: 92 }
+    ? { top: 110, bottom: 190, left: 30, right: 54 }
+    : { top: 80, bottom: 120, left: 345, right: 100 }
 }
 
-export function RadarMap({ site, layer, coverage, showCoverage, optical, points, selected, onSelect, contextRaster, contextOpacity, waterways, dumpyard }: Props) {
-  const container = useRef<HTMLDivElement>(null)
-  const map = useRef<maplibre.Map | null>(null)
-  const [loaded, setLoaded] = useState(false)
-  const [failed, setFailed] = useState(false)
-
-  function reset() {
-    if (!map.current) return
-    map.current.fitBounds([[site.bounds[0], site.bounds[1]], [site.bounds[2], site.bounds[3]]],
-      { padding: sitePadding(), duration: 350 })
+function rasterLayer(view: maplibre.Map, raster: ContextRaster | undefined, opacity: number) {
+  const source = view.getSource<maplibre.ImageSource>('observation')
+  if (source) {
+    const current = source.serialize()
+    if (raster && (current.type !== 'image' || current.url !== asset(raster.url))) {
+      source.updateImage({ url: asset(raster.url), coordinates: raster.coordinates })
+    }
+    view.setLayoutProperty('observation', 'visibility', raster ? 'visible' : 'none')
+    view.setPaintProperty('observation', 'raster-opacity', opacity)
+  } else if (raster) {
+    view.addSource('observation', { type: 'image', url: asset(raster.url), coordinates: raster.coordinates })
+    view.addLayer({ id: 'observation', type: 'raster', source: 'observation', paint: {
+      'raster-opacity': opacity, 'raster-resampling': 'nearest', 'raster-fade-duration': 0,
+    } }, 'site-outline')
   }
+}
+
+function addBoundary(view: maplibre.Map, site: Catalog['site']) {
+  view.addSource('site', { type: 'geojson', data: asset(site.boundaryUrl) })
+  view.addLayer({ id: 'site-outline', type: 'line', source: 'site',
+    paint: { 'line-color': '#f2e1b0', 'line-width': 1.8 } })
+}
+
+function setFootprint(view: maplibre.Map, id: string, path: string | undefined, color: string) {
+  const source = view.getSource<maplibre.GeoJSONSource>(id)
+  if (!path) {
+    if (source) view.setLayoutProperty(id, 'visibility', 'none')
+    return
+  }
+  if (source) {
+    void source.setData(asset(path))
+    view.setLayoutProperty(id, 'visibility', 'visible')
+    return
+  }
+  view.addSource(id, { type: 'geojson', data: asset(path) })
+  view.addLayer({ id, type: 'fill', source: id, paint: {
+    'fill-color': color, 'fill-opacity': .35, 'fill-outline-color': color,
+  } }, 'site-outline')
+}
+
+function addInfrastructure(view: maplibre.Map) {
+  view.addSource('infrastructure', { type: 'vector', url: 'https://tiles.openfreemap.org/planet',
+    attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · OpenFreeMap' })
+  view.addLayer({ id: 'roads', type: 'line', source: 'infrastructure', 'source-layer': 'transportation',
+    filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary']]],
+    paint: { 'line-color': '#ffdb89', 'line-width': 1.7 } }, 'site-outline')
+  view.addLayer({ id: 'waterways', type: 'line', source: 'infrastructure', 'source-layer': 'waterway',
+    paint: { 'line-color': '#7ccaff', 'line-width': 2 } }, 'site-outline')
+}
+
+export function RadarMap({ site, raster, optical, opacity, coverage, missing, leftCoverage, leftMissing, swipe, selected, onInspect, infrastructure }: Props) {
+  const shell = useRef<HTMLDivElement>(null)
+  const primaryNode = useRef<HTMLDivElement>(null)
+  const overlayNode = useRef<HTMLDivElement>(null)
+  const primary = useRef<maplibre.Map | null>(null)
+  const overlay = useRef<maplibre.Map | null>(null)
+  const [ready, setReady] = useState(false)
+  const [overlayReady, setOverlayReady] = useState(false)
+  const [failure, setFailure] = useState(false)
+  const [primaryError, setPrimaryError] = useState(false)
+  const [overlayError, setOverlayError] = useState(false)
+  const [split, setSplit] = useState(50)
+  const inspecting = useRef(onInspect)
+  const hasSwipe = Boolean(swipe)
+
+  useLayoutEffect(() => { inspecting.current = onInspect }, [onInspect])
+  const bounds: maplibre.LngLatBoundsLike = [[site.bounds[0], site.bounds[1]], [site.bounds[2], site.bounds[3]]]
 
   useEffect(() => {
-    if (!container.current) return
-    let view
+    let view: maplibre.Map
     try {
-      view = new maplibre.Map({
-        container: container.current, style,
-        bounds: [[site.bounds[0], site.bounds[1]], [site.bounds[2], site.bounds[3]]],
-        fitBoundsOptions: { padding: sitePadding(), duration: 0 },
-        attributionControl: { compact: true }, maxPitch: 0, dragRotate: false,
-      })
+      view = new maplibre.Map({ container: primaryNode.current!, style, bounds,
+        fitBoundsOptions: { padding: padding(), duration: 0 }, maxPitch: 0, dragRotate: false,
+        attributionControl: { compact: true } })
     } catch {
-      setFailed(true)
+      setFailure(true)
       return
     }
-    map.current = view
+    primary.current = view
     view.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right')
     view.addControl(new maplibre.ScaleControl({ maxWidth: 95, unit: 'metric' }), 'bottom-right')
-    view.on('load', () => {
-      view.fitBounds([[site.bounds[0], site.bounds[1]], [site.bounds[2], site.bounds[3]]],
-        { padding: sitePadding(), duration: 0 })
-      requestAnimationFrame(() => {
-        if (map.current !== view) return
-        view.resize()
-        view.fitBounds([[site.bounds[0], site.bounds[1]], [site.bounds[2], site.bounds[3]]],
-          { padding: sitePadding(), duration: 0 })
-      })
-      view.addSource('site', { type: 'geojson', data: asset(site.boundaryUrl) })
-      view.addLayer({ id: 'site-outline-shadow', type: 'line', source: 'site',
-        paint: { 'line-color': '#142227', 'line-width': 4, 'line-opacity': 0.9 } })
-      view.addLayer({ id: 'site-outline', type: 'line', source: 'site',
-        paint: { 'line-color': '#f2e1b0', 'line-width': 1.8 } })
-      view.addSource('infrastructure', { type: 'vector', url: 'https://tiles.openfreemap.org/planet',
-        attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · OpenFreeMap' })
-      view.addLayer({ id: 'buildings', type: 'fill', source: 'infrastructure', 'source-layer': 'building', minzoom: 14,
-        layout: { visibility: 'none' },
-        paint: { 'fill-color': '#5ee9dc', 'fill-outline-color': '#a8fff0', 'fill-opacity': .50 } })
-      view.addLayer({ id: 'roads', type: 'line', source: 'infrastructure', 'source-layer': 'transportation',
-        filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor']]], layout: { visibility: 'none' },
-        paint: { 'line-color': '#ffdb89', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 17, 3],
-          'line-opacity': .92 } })
-      view.addLayer({ id: 'waterways', type: 'line', source: 'infrastructure', 'source-layer': 'waterway',
-        layout: { visibility: 'none' }, paint: { 'line-color': '#7ccaff', 'line-width': 2 } })
-      setLoaded(true)
+    view.on('click', event => inspecting.current([event.lngLat.lng, event.lngLat.lat]))
+    view.on('error', event => {
+      if ('sourceId' in event && ['observation', 'site', 'valid', 'missing'].includes(String(event.sourceId))) setPrimaryError(true)
     })
-    return () => {
-      view.remove()
-      map.current = null
-    }
+    view.on('load', () => {
+      addBoundary(view, site)
+      setReady(true)
+    })
+    return () => { view.remove(); primary.current = null }
   }, [site])
 
   useEffect(() => {
-    const view = map.current
-    if (!loaded || !view) return
-    const existing = view.getSource<maplibre.ImageSource>('radar')
-    if (existing) existing.updateImage({ url: asset(layer.url), coordinates: layer.coordinates })
-    else {
-      view.addSource('radar', { type: 'image', url: asset(layer.url), coordinates: layer.coordinates })
-      view.addLayer({ id: 'radar', type: 'raster', source: 'radar', paint: {
-        'raster-fade-duration': 0, 'raster-resampling': 'nearest',
-      } }, 'site-outline-shadow')
-    }
-  }, [layer, loaded])
-
-  useEffect(() => {
-    const view = map.current
-    if (!loaded || !view?.getLayer('radar')) return
-    view.setPaintProperty('radar', 'raster-opacity', optical ? 0 : .88)
-    view.setPaintProperty('satellite', 'raster-opacity', optical ? 1 : .82)
-    view.setPaintProperty('satellite', 'raster-saturation', optical ? 0 : -.52)
-    view.setPaintProperty('satellite', 'raster-brightness-max', optical ? 1 : .8)
-    for (const id of ['roads', 'buildings']) view.setLayoutProperty(id, 'visibility', optical ? 'visible' : 'none')
-  }, [layer, optical, loaded])
-
-  useEffect(() => {
-    const view = map.current
-    if (!loaded || !view) return
-    view.setLayoutProperty('waterways', 'visibility', optical && waterways ? 'visible' : 'none')
-    if (!optical || !dumpyard) return
-    const pin = document.createElement('button')
-    pin.className = 'infrastructure-pin'
-    pin.type = 'button'
-    pin.textContent = 'Dumpyard'
-    const content = document.createElement('div')
-    const title = document.createElement('strong')
-    title.textContent = 'Pallikaranai Dumpyard'
-    const note = document.createElement('p')
-    note.textContent = 'Approximate location based on OpenStreetMap way 84106307 (edited July 29, 2026).'
-    const link = document.createElement('a')
-    link.href = 'https://www.openstreetmap.org/way/84106307'
-    link.textContent = 'OpenStreetMap feature'
-    link.target = '_blank'
-    link.rel = 'noreferrer'
-    content.append(title, note, link)
-    const marker = new maplibre.Marker({ element: pin }).setLngLat([80.226167, 12.954443])
-      .setPopup(new maplibre.Popup({ offset: 18 }).setDOMContent(content)).addTo(view)
-    return () => { marker.remove() }
-  }, [loaded, optical, waterways, dumpyard])
-
-  useEffect(() => {
-    const view = map.current
-    if (!loaded || !view) return
-    const current = view.getSource<maplibre.ImageSource>('context-raster')
-    if (!contextRaster) {
-      if (current) view.setLayoutProperty('context-raster', 'visibility', 'none')
+    const master = primary.current
+    if (!ready || !hasSwipe || !master || !overlayNode.current) return
+    let view: maplibre.Map
+    try {
+      view = new maplibre.Map({ container: overlayNode.current, style, interactive: false,
+        attributionControl: false, maxPitch: 0 })
+    } catch {
+      setOverlayError(true)
       return
     }
-    const image = { url: asset(contextRaster.url), coordinates: contextRaster.coordinates }
-    if (current) current.updateImage(image)
-    else {
-      view.addSource('context-raster', { type: 'image', ...image })
-      view.addLayer({ id: 'context-raster', type: 'raster', source: 'context-raster',
-        paint: { 'raster-resampling': 'nearest', 'raster-fade-duration': 0 }
-      }, 'site-outline-shadow')
-    }
-    view.setLayoutProperty('context-raster', 'visibility', 'visible')
-  }, [loaded, contextRaster])
-
-  useEffect(() => {
-    const view = map.current
-    if (loaded && view?.getLayer('context-raster')) view.setPaintProperty('context-raster', 'raster-opacity', contextOpacity)
-  }, [loaded, contextRaster, contextOpacity])
-
-  useEffect(() => {
-    const view = map.current
-    if (!loaded || !view) return
-    const current = view.getSource<maplibre.GeoJSONSource>('coverage')
-    if (current) void current.setData(asset(coverage))
-    else {
-      view.addSource('coverage', { type: 'geojson', data: asset(coverage) })
-      view.addLayer({ id: 'coverage-fill', type: 'fill', source: 'coverage',
-        paint: { 'fill-color': '#32cfbd', 'fill-opacity': 0.26 } }, 'site-outline')
-      view.addLayer({ id: 'coverage-outline', type: 'line', source: 'coverage',
-        paint: { 'line-color': '#66f9e3', 'line-width': 2 } })
-    }
-    for (const id of ['coverage-fill', 'coverage-outline']) {
-      view.setLayoutProperty(id, 'visibility', showCoverage ? 'visible' : 'none')
-    }
-  }, [loaded, coverage, showCoverage])
-
-  useEffect(() => {
-    const view = map.current
-    if (!loaded || !view) return
-    const markers = points.map((point, index) => {
-      const element = document.createElement('button')
-      const stronger = point.tail === 'upper'
-      const title = stronger ? 'Stronger radar return' : 'Weaker radar return'
-      const amount = `${point.median_change_db > 0 ? '+' : ''}${point.median_change_db.toFixed(1)} dB`
-      element.type = 'button'
-      element.className = `change-marker ${point.tail}`
-      element.textContent = String(index + 1)
-      element.setAttribute('aria-pressed', String(selected === point))
-      element.setAttribute('aria-label', `Candidate ${index + 1}: ${title}, ${amount}`)
-      const tooltip = document.createElement('span')
-      tooltip.className = 'marker-tip'
-      tooltip.textContent = `${title} · ${amount}`
-      element.append(tooltip)
-      element.addEventListener('click', event => {
-        event.stopPropagation()
-        onSelect(point)
-        view.easeTo({ center: point.pixel_centroid_lon_lat, zoom: Math.max(15.2, view.getZoom()),
-          offset: window.innerWidth < 720 ? [0, -95] : [-105, 5], duration: 500 })
-      })
-      const marker = new maplibre.Marker({ element }).setLngLat(point.pixel_centroid_lon_lat).addTo(view)
-      return marker
+    overlay.current = view
+    const sync = () => view.jumpTo({ center: master.getCenter(), zoom: master.getZoom(),
+      bearing: master.getBearing(), padding: master.getPadding() })
+    master.on('move', sync)
+    master.on('resize', sync)
+    view.on('error', event => {
+      if ('sourceId' in event && event.sourceId === 'observation') setOverlayError(true)
     })
-    return () => markers.forEach(marker => marker.remove())
-  }, [loaded, points, onSelect, selected])
+    view.on('load', () => {
+      sync()
+      addBoundary(view, site)
+      setOverlayReady(true)
+    })
+    sync()
+    return () => {
+      master.off('move', sync)
+      master.off('resize', sync)
+      view.remove()
+      overlay.current = null
+      setOverlayReady(false)
+      setOverlayError(false)
+    }
+  }, [ready, hasSwipe, site])
 
-  return <div className="map-shell">
-    <div ref={container} className="map-canvas" aria-label="Interactive map of Pallikaranai Marsh" />
-    {failed && <div className="map-fallback"><img src={asset(layer.url)} alt="Radar layer preview" />
-      <p>Interactive mapping requires WebGL. Showing the selected radar raster.</p></div>}
-    <button type="button" className="fit floating" onClick={reset} disabled={failed} aria-label="Fit map to Ramsar site" title="Fit to marsh">⌖</button>
-    {selected && <span className="sr-only">Selected candidate {selected.median_change_db.toFixed(1)} dB</span>}
+  useEffect(() => {
+    if (!ready || !primary.current) return
+    setPrimaryError(false)
+    rasterLayer(primary.current, raster, opacity)
+    primary.current.setPaintProperty('satellite', 'raster-saturation', optical ? 0 : -.58)
+  }, [ready, raster, opacity, optical])
+
+  const leftRaster = swipe?.raster
+  useEffect(() => {
+    if (!overlayReady || !overlay.current) return
+    setOverlayError(false)
+    rasterLayer(overlay.current, leftRaster, opacity)
+  }, [overlayReady, leftRaster, opacity])
+
+  useEffect(() => {
+    if (!ready || !primary.current) return
+    for (const view of [primary.current, overlayReady ? overlay.current : null]) {
+      if (!view) continue
+      setFootprint(view, 'valid', view === overlay.current ? leftCoverage ?? coverage : coverage, '#53e4ce')
+      setFootprint(view, 'missing', view === overlay.current ? leftMissing ?? missing : missing, '#ecad61')
+    }
+  }, [ready, overlayReady, coverage, missing, leftCoverage, leftMissing])
+
+  useEffect(() => {
+    const view = primary.current
+    if (!ready || !view) return
+    if (infrastructure && !view.getSource('infrastructure')) addInfrastructure(view)
+    for (const id of ['roads', 'waterways']) {
+      if (view.getLayer(id)) view.setLayoutProperty(id, 'visibility', infrastructure ? 'visible' : 'none')
+    }
+  }, [ready, infrastructure])
+
+  useEffect(() => {
+    if (!ready || !primary.current || !selected) return
+    const view = primary.current
+    const pin = document.createElement('span')
+    pin.className = 'inspection-marker'
+    pin.setAttribute('aria-hidden', 'true')
+    const marker = new maplibre.Marker({ element: pin }).setLngLat(selected).addTo(view)
+    return () => { marker.remove() }
+  }, [ready, selected])
+
+  function moveDivider(event: PointerEvent<HTMLDivElement>) {
+    const rect = shell.current?.getBoundingClientRect()
+    if (rect?.width) setSplit(Math.round(Math.max(0, Math.min(100, (event.clientX - rect.left) * 100 / rect.width))))
+  }
+
+  return <div ref={shell} className="map-shell">
+    <div ref={primaryNode} className="map-canvas" aria-label="Interactive map of Pallikaranai Marsh" />
+    {swipe && !failure && <>
+      <div ref={overlayNode} className="map-canvas swipe-map" aria-hidden="true"
+        style={{ clipPath: `inset(0 ${100 - split}% 0 0)`, visibility: overlayReady ? 'visible' : 'hidden' }} />
+      <div className="map-divider" style={{ left: `${split}%` }} aria-hidden="true"
+        onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); moveDivider(event) }}
+        onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) moveDivider(event) }}>
+        <span>↔</span>
+      </div>
+      <div className="map-swipe floating">
+        <div><span>{swipe.left}</span><span>{swipe.right}</span></div>
+        <input type="range" min="0" max="100" value={split} aria-label="Map swipe divider"
+          aria-valuetext={`${split}% ${swipe.left}`} onChange={event => setSplit(Number(event.target.value))} />
+      </div>
+    </>}
+    {failure && <div className="map-fallback">{raster && <img src={asset(raster.url)} alt="Observation raster preview" />}
+      <p>Interactive mapping requires WebGL.</p></div>}
+    {(primaryError || overlayError) && <p className="map-status floating" role="status">A selected map layer could not load.</p>}
+    {!ready && !failure && <p className="map-status floating" role="status">Loading map…</p>}
+    <button type="button" className="fit floating" onClick={() => primary.current?.fitBounds(bounds,
+      { padding: padding(), duration: 350 })} disabled={!ready} aria-label="Fit map to Ramsar site" title="Fit to marsh">⌖</button>
   </div>
 }

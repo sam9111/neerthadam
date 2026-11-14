@@ -10,6 +10,7 @@ export type Layer = {
 }
 export type Observation = {
   id: string; date: string; granuleId: string; coveragePct: number; coverageUrl: string
+  provenance?: { downloadUrl: string; collection: string }
   layers: Record<Polarization, Layer>
   fixedFootprint: Record<Polarization, Stats>
 }
