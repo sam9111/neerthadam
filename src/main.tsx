@@ -1,275 +1,160 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { asset, observationDate, type Catalog, type Comparison, type Group, type Polarization, type Stats } from './catalog'
-import { RadarMap } from './Map'
+import { asset, observationDate, type Catalog, type Polarization } from './catalog'
+import { RadarMap, type ChangePoint } from './Map'
 import './style.css'
 
-function Brand() {
-  return <div className="brand">
-    <svg width="37" height="37" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-      <rect x=".5" y=".5" width="35" height="35" rx="10" stroke="#547f72" fill="#203e3a"/>
-      <path d="M7 15c4.5 0 6.6-4 11-4s6.5 4 11 4M7 20c4.5 0 6.6-4 11-4s6.5 4 11 4M7 25c4.5 0 6.6-4 11-4s6.5 4 11 4" stroke="#c6e0a3" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-    <span>Neerthadam<small>Pallikaranai Marsh Observatory</small></span>
-  </div>
-}
+type Rainfall = { source: string; sourceUrl: string; windows: Record<string, {
+  total: number | null; validDays: number
+}> }
 
-function day(date: string) {
-  return observationDate(date, { year: undefined })
-}
-
-function amount(value: number | null, signed = false) {
-  if (value == null || !Number.isFinite(value)) return '—'
-  return `${signed && value > 0 ? '+' : ''}${value.toFixed(2)}`
-}
-
-function area(value: number) {
-  if (Math.abs(100 - value) < 0.005) return '100%'
-  return `${value.toFixed(1)}%`
-}
-
-function Trend({ group, activeId, pol, select }: {
-  group: Group; activeId: string; pol: Polarization; select: (id: string) => void
-}) {
-  const dateValues = group.observations.map(item => Date.parse(item.date))
-  const datesValid = dateValues.every(Number.isFinite)
-  const start = Math.min(...dateValues)
-  const end = Math.max(...dateValues)
-  const xs = group.observations.map((_, i) => {
-    if (group.observations.length === 1) return 114
-    return datesValid && end > start
-      ? 22 + 184 * (dateValues[i] - start) / (end - start)
-      : 22 + 184 * i / (group.observations.length - 1)
-  })
-  const values = group.observations.map(item => item.fixedFootprint[pol].median)
-  const valid = values.filter((v): v is number => v !== null && Number.isFinite(v))
-  if (!valid.length) return <p className="empty-trend">No median available for the fixed footprint.</p>
-  const min = Math.min(...valid)
-  const max = Math.max(...valid)
-  const span = Math.max(max - min, 0.75)
-  const center = (min + max) / 2
-  const ys = values.map(v => v === null ? null : 36 - 44 * (v - center) / span)
-  return <div className="trend">
-    <svg viewBox="0 0 228 72" role="img" aria-label={`Fixed-footprint median HH/HV series, ${pol}`}>
-      {[14, 36, 58].map(y => <path key={y} d={`M15 ${y}H213`} stroke="#304744" strokeDasharray="3 4" />)}
-      {xs.map((x, i) => i > 0 && ys[i] !== null && ys[i - 1] !== null &&
-        <path key={x} d={`M${xs[i-1]} ${ys[i-1]}L${x} ${ys[i]}`} stroke="#c7e2a5" strokeWidth="1.4" strokeDasharray="3 4" />)}
-      {group.observations.map((item, i) => ys[i] !== null && <circle key={item.id}
-        cx={xs[i]} cy={ys[i]!} r={activeId === item.id ? 4.4 : 3.3}
-        fill={activeId === item.id ? '#c7e2a5' : '#223d38'} stroke="#c7e2a5" strokeWidth="1.5">
-        <title>{observationDate(item.date)} · {amount(values[i])} dB</title>
-      </circle>)}
-    </svg>
-    <div className="trend-dates">{group.observations.map((item, i) => <button type="button" key={item.id}
-      aria-pressed={activeId === item.id} onClick={() => select(item.id)}>
-      {day(item.date)} <strong>{amount(values[i])}</strong>
-    </button>)}</div>
-  </div>
-}
-
-function Maturity({ value }: { value: Group['maturity'] }) {
-  return <span className={`maturity ${value}`}><i aria-hidden="true" />{value}</span>
-}
-
-type Rainfall = {
-  source: string; sourceUrl: string; longitude: number; latitude: number; units: 'mm'
-  windows: Record<string, { start: string; end: string; total: number | null; validDays: number }>
-}
-function Precipitation({ dates }: { dates: string[] }) {
-  const [data, setData] = useState<Rainfall | null>(null)
+function useAsset<T>(url?: string) {
+  const [result, setResult] = useState<{ url: string; value: T }>()
   useEffect(() => {
+    if (!url) return
     const controller = new AbortController()
-    fetch(asset('context/rainfall.json'), { signal: controller.signal }).then(async response => {
-      if (response.ok) setData(await response.json())
-    }).catch(() => {})
+    fetch(asset(url), { signal: controller.signal }).then(response => {
+      if (!response.ok) throw new Error('Asset unavailable')
+      return response.json() as Promise<T>
+    }).then(value => setResult({ url, value })).catch(() => {})
     return () => controller.abort()
-  }, [])
-  if (!data) return null
-  const windows = dates.map(date => ({ date, item: data.windows[date.slice(0, 10)] }))
-  return <section className="rain-card">
-    <h3>Gridded rainfall context</h3>
-    {windows.map(({ date, item }) => <p key={date}>{day(date)} · <strong>
-      {item?.total != null ? `${item.total.toFixed(1)} mm` : 'Unavailable'}
-    </strong>{item && ` · ${item.validDays}/7 days`}</p>)}
-    <p>Seven UTC days before each observation. <a href={data.sourceUrl} target="_blank" rel="noreferrer">{data.source}</a></p>
-  </section>
+  }, [url])
+  return result?.url === url ? result?.value : undefined
 }
-
-function StatsPanel({ stats, comparison, coverage, group, selectedId, pol, select, rainDates }: {
-  stats: Stats; comparison?: Comparison; coverage: number; group: Group
-  selectedId: string; pol: Polarization; select: (id: string) => void; rainDates: string[]
-}) {
-  return <aside className="stats-panel">
-    <header className="panel-heading"><h2>Observation statistics</h2><span>{pol}</span></header>
-    <div className="primary-stat">
-      <span>{comparison ? 'Median change' : 'Median backscatter'}</span>
-      <div>{amount(stats.median, !!comparison)} <small>dB</small></div>
-    </div>
-    <dl className="stats-grid">
-      <div><dt>5th percentile</dt><dd>{amount(stats.p05, !!comparison)} <small>dB</small></dd></div>
-      <div><dt>95th percentile</dt><dd>{amount(stats.p95, !!comparison)} <small>dB</small></dd></div>
-      <div><dt>Fixed-footprint cells</dt><dd>{stats.count.toLocaleString('en-GB')}</dd></div>
-      <div><dt>{comparison ? 'Pair coverage' : 'Scene coverage'}</dt><dd>{area(coverage)}</dd></div>
-    </dl>
-    <section className="time-series">
-      <header><h3>Acquisition series</h3><span>dB</span></header>
-      <p>Median over the same {area(group.coveragePct)} of the site across this group.</p>
-      <Trend group={group} activeId={selectedId} pol={pol} select={select} />
-    </section>
-    <Precipitation dates={rainDates} />
-    <div className="study-note"><span aria-hidden="true">ⓘ</span><p>
-      {group.maturity === 'provisional' && 'Provisional calibration and geometry may affect the signal. '}
-      Backscatter reflects surface and vegetation conditions. The physical causes of mapped changes remain unverified.
-    </p></div>
-  </aside>
-}
+const day = (date: string) => observationDate(date, { year: undefined })
+const coverage = (value: number) => `${Number(value.toFixed(1))}%`
+const db = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`
 
 function Explorer({ catalog }: { catalog: Catalog }) {
-  const [groupId, setGroupId] = useState(catalog.groups[0].id)
-  const [observationId, setObservationId] = useState(catalog.groups[0].observations.at(-1)!.id)
+  const [groupIndex, setGroup] = useState(0)
+  const [pairIndex, setPair] = useState(0)
+  const [dateId, setDate] = useState('')
   const [pol, setPol] = useState<Polarization>('HH')
-  const [mode, setMode] = useState<'observation'|'change'>('observation')
-  const [pairIndex, setPairIndex] = useState(0)
-  const [coverage, setCoverage] = useState(false)
-  const [candidates, setCandidates] = useState(true)
-  const [opacity, setOpacity] = useState(.92)
-  const [about, setAbout] = useState(false)
-  const [coverageFootprint, setCoverageFootprint] = useState<'active'|'fixed'>('active')
-  const processedCount = new Set(catalog.groups.flatMap(item => item.observations.map(o => o.granuleId))).size
-  const group = catalog.groups.find(item => item.id === groupId)!
-  const selected = group.observations.find(item => item.id === observationId) ?? group.observations.at(-1)!
-  const pair = mode === 'change' ? group.comparisons[pairIndex] : undefined
-  const later = (pair && group.observations.find(item => item.id === pair.laterId)) || selected
-  const earlier = pair && group.observations.find(item => item.id === pair.earlierId)
-  const active = pair ?? selected
+  const [optical, setOptical] = useState(false)
+  const [showCoverage, setCoverage] = useState(false)
+  const [showMethods, setMethods] = useState(false)
+  const [details, setDetails] = useState<ChangePoint>()
+  const rain = useAsset<Rainfall>('context/rainfall.json')
+  const group = catalog.groups[groupIndex]
+  const pair = group.comparisons[pairIndex]
+  const observation = group.observations.find(item => item.id === dateId) ?? group.observations.at(-1)!
+  const earlier = group.observations.find(item => item.id === pair?.earlierId)
+  const later = group.observations.find(item => item.id === pair?.laterId)
+  const change = !dateId && !!pair
+  const active = change ? pair : observation
   const layer = active.layers[pol]
-  function switchGroup(id: string) {
-    const group = catalog.groups.find(item => item.id === id)!
-    setGroupId(id)
-    setObservationId(group.observations.at(-1)!.id)
-    setPairIndex(0)
-    if (!group.comparisons.length) setMode('observation')
-  }
-  function switchObservation(id: string) {
-    setObservationId(id)
-    setMode('observation')
-  }
-  return <>
-    <header className="topbar">
-      <Brand />
-      <button type="button" className="guide-button" onClick={() => setAbout(v => !v)} aria-expanded={about}>
-        <span aria-hidden="true">ⓘ</span> Methods
-      </button>
+  const candidates = useAsset<{ features: Array<{ properties: ChangePoint }> }>(change ? pair.candidateUrl : undefined)
+  const points = useMemo(() => (candidates?.features ?? []).map(item => item.properties)
+    .filter(point => point.polarization === pol && point.pixel_centroid_lon_lat?.length === 2)
+    .sort((a, b) => b.site_area_ha - a.site_area_ha), [candidates, pol])
+  const featured = useMemo(() => points.slice(0, 8), [points])
+  const dates = change && earlier && later ? [earlier.date, later.date] : [observation.date]
+  const title = change && earlier && later ? `${day(earlier.date)} – ${observationDate(later.date)}` : observationDate(observation.date)
+
+  const selectCandidate = useCallback((point: ChangePoint) => {
+    setDetails(point)
+    setMethods(false)
+  }, [])
+
+  return <main className="explorer">
+    <RadarMap site={catalog.site} layer={layer} coverage={active.coverageUrl}
+      showCoverage={showCoverage} optical={optical} points={featured}
+      onSelect={selectCandidate} selected={details} />
+    <header className="brand floating">
+      <span className="brand-icon" aria-hidden="true">≋</span>
+      <div><h1>Neerthadam</h1><p>Pallikaranai Marsh · Chennai</p></div>
     </header>
-    <main>
-      <div className="page-heading">
-        <div><p className="location"><span></span> CHENNAI, INDIA</p><h1>Radar time series</h1>
-          <p>Explore NISAR observations across the Pallikaranai Marsh Ramsar site.</p>
-          <p className="scope-count">{processedCount} processed acquisitions across {catalog.groups.length} compatible series</p></div>
-        <div className="group-picker">
-          <label htmlFor="group">Acquisition group</label>
-          <select id="group" value={group.id} onChange={event => switchGroup(event.target.value)}>
-            {catalog.groups.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-          <Maturity value={group.maturity} />
+    <div className="view-switch floating" aria-label="Map layers">
+      <button type="button" aria-pressed={!optical} onClick={() => setOptical(false)}>Radar</button>
+      <button type="button" aria-pressed={optical} onClick={() => setOptical(true)}>Optical + infrastructure</button>
+    </div>
+    <section className="control-card floating" aria-label="Observation controls">
+      <div className="control-heading">
+        <div><h2>{change ? 'Radar change' : 'Radar backscatter'}</h2><p>{title}</p></div>
+        <span className={`maturity ${group.maturity}`}>{group.maturity}</span>
+      </div>
+      <div className="controls">
+        <select aria-label="Acquisition group" value={groupIndex} onChange={event => {
+          setGroup(Number(event.target.value)); setPair(0); setDate(''); setDetails(undefined)
+        }}>
+          {catalog.groups.map((item, index) => <option key={item.id} value={index}>
+            {day(item.observations[0].date)} series · {item.spacingM} m · {item.maturity}
+          </option>)}
+        </select>
+        <select aria-label="Radar view" value={dateId || `pair-${pairIndex}`} onChange={event => {
+          const value = event.target.value
+          if (value.startsWith('pair-')) { setPair(Number(value.slice(5))); setDate('') } else setDate(value)
+          setDetails(undefined)
+        }}>
+          {group.comparisons.map((item, index) => <option key={index} value={`pair-${index}`}>
+            Change · {day(group.observations.find(o => o.id === item.earlierId)!.date)}–{day(group.observations.find(o => o.id === item.laterId)!.date)}
+          </option>)}
+          {group.observations.map(item => <option key={item.id} value={item.id}>{observationDate(item.date)}</option>)}
+        </select>
+        <div className="polar" aria-label="Radar polarization">
+          {(['HH', 'HV'] as const).map(channel => <button key={channel} type="button" aria-pressed={pol === channel}
+            onClick={() => { setPol(channel); setDetails(undefined) }}>{channel}</button>)}
         </div>
       </div>
-      {about && <section className="guide-panel">
-        <h2>How to read the map</h2>
-        <p>Backscatter is measured in decibels. Compare dates within a compatible group. The chart uses the overlap of valid HH and HV across all processed dates in that group.</p>
-        <p>In change mode, positive values mean a stronger return on the later date. The raster shows native differences. Exploratory candidate outlines use a separate noise-screened 3 × 3 analysis. Coverage identifies usable measurements. Rainfall is contextual and does not establish a cause.</p>
-        <div><a href="https://nisar-docs.asf.alaska.edu/gcov/" target="_blank" rel="noreferrer">About NISAR GCOV ↗</a>
-          <a href="https://rsis.ramsar.org/ris/2481" target="_blank" rel="noreferrer">Ramsar Site 2481 ↗</a></div>
-      </section>}
-      <div className="workspace">
-        <section className="map-panel" aria-label="Observation explorer">
-          <div className="toolbar">
-            <div className="seg" aria-label="Map mode">
-              <button type="button" aria-pressed={!pair} onClick={() => setMode('observation')}>Backscatter</button>
-              <button type="button" aria-pressed={!!pair} onClick={() => setMode('change')} disabled={!group.comparisons.length}>Pair change</button>
-            </div>
-            <div className="seg polar" aria-label="Polarization">
-              {(['HH', 'HV'] as const).map(val => <button type="button" key={val} aria-pressed={pol === val} onClick={() => setPol(val)}>{val}</button>)}
-            </div>
-            <div className="map-meta">L-band {group.frequency}<b>·</b>{group.spacingM} m pixels</div>
-          </div>
-          <RadarMap site={catalog.site} layer={layer}
-            coverage={coverageFootprint === 'fixed' ? group.footprintUrl : active.coverageUrl}
-            candidateUrl={pair?.candidateUrl} showCoverage={coverage} showCandidates={candidates}
-            mode={pair ? 'change' : 'observation'} opacity={opacity} polarization={pol}
-            onCoverage={() => setCoverage(v => !v)} />
-          <div className="layerbar">
-            <div className="legend-block">
-              <span><b>{pol}</b> {pair ? 'native change' : 'backscatter'} <small>dB</small></span>
-              <div className="legend"><div className={pair ? 'gradient delta' : 'gradient'} />
-                <div><span>{layer.min}</span><span>{pair && layer.min < 0 && layer.max > 0 ? 0 : ((layer.min + layer.max) / 2).toFixed(1)}</span><span>{layer.max}</span></div>
-              </div>
-            </div>
-            <div className="layer-controls">
-              {coverage && <select aria-label="Coverage footprint" value={coverageFootprint}
-                onChange={e => setCoverageFootprint(e.target.value === 'fixed' ? 'fixed' : 'active')}>
-                <option value="active">{pair ? 'Pair coverage' : 'Scene coverage'}</option>
-                <option value="fixed">Fixed series footprint</option>
-              </select>}
-              {pair?.candidateUrl && <label className="checkbox"><input type="checkbox" checked={candidates} onChange={event => setCandidates(event.target.checked)} />3 × 3 candidates</label>}
-              <label className="opacity">Opacity<input type="range" min=".15" max="1" step=".01"
-                value={opacity} onChange={e => setOpacity(Number(e.target.value))} /></label>
-            </div>
-          </div>
-        </section>
-        <StatsPanel stats={active.fixedFootprint[pol]} comparison={pair}
-          coverage={active.coveragePct} group={group} selectedId={later.id} pol={pol} select={switchObservation} rainDates={earlier ? [earlier.date, later.date] : [later.date]} />
+      {optical ? <p className="hint">Reference imagery · gold roads · cyan building footprints at closer zoom.</p> :
+        <div className="legend"><div className={change ? 'colorbar change' : 'colorbar'} />
+          <div><span>{change ? 'Weaker return' : 'Weaker'} · {layer.min} dB</span><span>{change ? 'Stronger return' : 'Stronger'} · {layer.max} dB</span></div></div>}
+      <div className="card-footer">
+        <button type="button" aria-pressed={showCoverage} onClick={() => setCoverage(!showCoverage)}>
+          {coverage(active.coveragePct)} site coverage
+        </button>
+        <button type="button" aria-expanded={showMethods} onClick={() => (setMethods(!showMethods), setDetails(undefined))}>How to read this map</button>
       </div>
-      <section className="timeline" aria-label="Timeline">
-        <header><h2>Acquisition timeline</h2>
-          <span>{group.observations.length} {group.observations.length === 1 ? 'observation' : 'observations'}</span></header>
-        {pair ? <div className="pair-picker">
-          <label htmlFor="pair">Compare dates</label>
-          <select id="pair" value={pairIndex} onChange={e => setPairIndex(Number(e.target.value))}>
-            {group.comparisons.map((comparison, i) => <option key={i} value={i}>
-              {observationDate(group.observations.find(o => o.id === comparison.earlierId)!.date)} → {observationDate(group.observations.find(o => o.id === comparison.laterId)!.date)}
-            </option>)}
-          </select>
-          {pair.screen && <p>{pair.screen}</p>}
-        </div> : <div className="timeline-track">
-          {group.observations.map(item => <button type="button" key={item.id} aria-pressed={selected.id === item.id}
-            onClick={() => switchObservation(item.id)}>
-            <span className="timeline-dot" aria-hidden="true" />
-            <strong>{observationDate(item.date)}</strong><small>{area(item.coveragePct)} site coverage</small>
-          </button>)}
-        </div>}
-      </section>
-      <details className="provenance">
-        <summary>Data provenance <span>{group.release}</span></summary>
-        <p>NISAR L2 GCOV · {group.direction} · Track {group.track} · Frame {group.frame} · {(group.centerFrequencyHz / 1e9).toFixed(4)} GHz center frequency.</p>
-        {earlier && <p className="granule">{earlier.granuleId}</p>}
-        <p className="granule">{later.granuleId}</p>
+      {change && !optical && <p className="hint">{points.length ? `Explore ${featured.length} of ${points.length} candidate areas. Hover for a preview or select for rainfall.` : 'Candidate markers are available for the July 10 m series.'}</p>}
+    </section>
+    {showMethods && <aside className="info-card floating" aria-label="Map methods">
+      <button type="button" className="close" aria-label="Close methods" onClick={() => setMethods(false)}>×</button>
+      <h2>How to read this map</h2>
+      <p>Blue and red show weaker and stronger radar returns on the later date. The change colors show native differences. Markers highlight the largest available candidate areas from a separate noise-screened, smoothed analysis.</p>
+      <p>Rainfall estimates describe the marsh vicinity. The cause of each radar change remains unverified. The optical imagery and infrastructure are geographic reference layers.</p>
+      <p>Site median on the shared footprint: {active.fixedFootprint[pol].median == null ? 'Unavailable' : db(active.fixedFootprint[pol].median)} · {group.release}</p>
+      <details><summary>Source details</summary>
+        <p>{group.direction} · Track {group.track} · Frame {group.frame} · {group.spacingM} m pixels</p>
+        {dates.map(date => <p key={date}>{group.observations.find(item => item.date === date)?.granuleId}</p>)}
         {group.notes.map(note => <p key={note}>{note}</p>)}
       </details>
-    </main>
-    <footer><span>Neerthadam · NASA Space Apps Challenge 2026</span><a href="https://rsis.ramsar.org/ris/2481" target="_blank" rel="noreferrer">Ramsar Site {catalog.site.id} ↗</a></footer>
-  </>
+      <a href="https://rsis.ramsar.org/ris/2481" target="_blank" rel="noreferrer">Ramsar Site 2481</a>
+    </aside>}
+    {details && <aside className="info-card investigation floating" aria-label="Candidate investigation" aria-live="polite">
+      <button type="button" className="close" aria-label="Close investigation" onClick={() => setDetails(undefined)}>×</button>
+      <span className="kicker">Candidate radar change</span>
+      <h2>{details.tail === 'upper' ? 'Stronger radar return' : 'Weaker radar return'}</h2>
+      <p><strong>{db(details.median_change_db)}</strong> median change · {details.site_area_ha.toFixed(2)} ha · {pol}</p>
+      <h3>Rainfall near Pallikaranai</h3>
+      {dates.map(date => {
+        const window = rain?.windows[date.slice(0, 10)]
+        return <div className="rain-row" key={date}><span>Before {day(date)}</span>
+          <strong>{window?.total == null ? 'Unavailable' : `${window.total.toFixed(1)} mm`}</strong></div>
+      })}
+      <p>Seven complete UTC days before each image. Gridded rainfall gives context across the marsh vicinity.</p>
+      {rain && <a href={rain.sourceUrl} target="_blank" rel="noreferrer">{rain.source}</a>}
+      <p>Physical cause remains unverified.</p>
+      <button type="button" onClick={() => setOptical(!optical)}>{optical ? 'Return to radar' : 'See nearby roads and buildings'}</button>
+    </aside>}
+  </main>
 }
 
 function App() {
-  const [catalog, setCatalog] = useState<Catalog | null>(null)
-  const [failure, setFailure] = useState(false)
+  const [catalog, setCatalog] = useState<Catalog>()
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
     fetch(asset('data/catalog.json'), { signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error('Catalog unavailable')
       const data: Catalog = await response.json()
-      if (data.schemaVersion !== 1 || !data.groups?.length || data.groups.some(group => !group.observations.length)) {
-        throw new Error('Catalog has no supported observations')
-      }
+      if (data.schemaVersion !== 1 || !data.groups?.length || data.groups.some(group => !group.observations.length)) throw new Error('Invalid catalog')
       setCatalog(data)
-    }).catch(error => { if (error.name !== 'AbortError') setFailure(true) })
+    }).catch(error => { if (error.name !== 'AbortError') setFailed(true) })
     return () => controller.abort()
   }, [])
-  return catalog ? <Explorer catalog={catalog} /> : <div className="load"><Brand />
-    <p role="status">{failure ? 'The observation catalog could not be loaded.' : 'Loading NISAR observations…'}</p>
-    {failure && <button type="button" onClick={() => location.reload()}>Try again</button>}
-  </div>
+  if (catalog) return <Explorer catalog={catalog} />
+  return <div className="loading"><h1>Neerthadam</h1><p role="status">{failed ? 'The map data could not be loaded.' : 'Loading Pallikaranai Marsh…'}</p>
+    {failed && <button type="button" onClick={() => location.reload()}>Try again</button>}</div>
 }
 
 createRoot(document.getElementById('root')!).render(<App />)
