@@ -70,17 +70,19 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   // July 18 T44PMV SCL contained only class 9 over the site (31,160 centers).
   // See research/sentinel_july_screen.csv for the source and native quality counts.
   const cloudyExample = step === 1 && observation.date.startsWith('2026-07-18')
-  const showCloudImage = cloudyExample && display === 'reference'
+  const showCloudImage = cloudyExample && sensorSwipe
   const difference = comparing && display === 'difference'
   const radarLayer = difference ? pair.layers[pol] : comparing ? later?.layers[pol] : observation.layers[pol]
   const opticalRaster = useMemo(() => optical ? {
     url: opticalIndex?.assets[opticalLayer.toLowerCase()] ?? optical.assets.rgb,
     coordinates: opticalIndex?.coordinates ?? optical.coordinates,
   } : undefined, [optical, opticalIndex, opticalLayer])
-  const raster = showCloudImage ? cloudy.value : display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
+  const raster = showCloudImage ? cloudy.value ?? radarLayer : display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
   const swipe = comparing && display === 'swipe' && earlier && later ? {
     raster: earlier.layers[pol], left: shortDate(earlier.date), right: shortDate(later.date),
-  } : sensorSwipe && optical ? {
+  } : showCloudImage && cloudy.value ? {
+    raster: observation.layers[pol], left: 'NISAR · 13:11 UTC', right: 'Sentinel-2 · 05:15 UTC',
+  } : sensorSwipe && optical && !cloudyExample ? {
     raster: observation.layers[pol], left: `NISAR · ${shortDate(observation.date)}`,
     right: `Sentinel-2 · ${shortDate(optical.acquiredAt)}`,
   } : undefined
@@ -110,7 +112,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
     setOpticalLayer('rgb')
     setInfrastructure(next === 0 || next === 4)
     setMode(next === 3 ? 'Compare' : next === 1 || next === 4 ? 'Investigate' : 'Observe')
-    setDisplay(next <= 1 ? 'reference' : next === 3 ? 'swipe' : next === 4 ? 'optical' : 'radar')
+    setDisplay(next === 0 ? 'reference' : next === 1 ? 'sensor-swipe' : next === 3 ? 'swipe' : next === 4 ? 'optical' : 'radar')
     setFootprint(next === 2 || next === 3 ? 'valid' : 'off')
     setLocation(next === 4 ? catalog.site.center : undefined)
     setContextOpen(next === 4)
@@ -179,10 +181,6 @@ function Workspace({ catalog }: { catalog: Catalog }) {
         <button type="button" aria-pressed={!difference} onClick={() => setDisplay('swipe')}>Swipe</button>
         <button type="button" aria-pressed={difference} onClick={() => setDisplay('difference')}>Difference</button>
       </div>}
-      {cloudyExample && <div className="toggle-row" aria-label="July 18 map view">
-        <button type="button" aria-pressed={showCloudImage} onClick={() => setDisplay('reference')}>Sentinel-2 true color</button>
-        <button type="button" aria-pressed={!showCloudImage} onClick={() => setDisplay('radar')}>NISAR backscatter</button>
-      </div>}
       {mode === 'Investigate' && !cloudyExample && <div className="toggle-row">
         <button type="button" aria-pressed={display === 'radar'} onClick={() => setDisplay('radar')}>Radar</button>
         <button type="button" aria-pressed={sensorSwipe} onClick={() => { setOpticalLayer('rgb'); setDisplay('sensor-swipe') }}>Radar vs. Optical</button>
@@ -199,7 +197,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
         {opticalIndex?.formula && ` ${opticalLayer} (unitless, −1 to 1) · ${opticalIndex.formula}`}</p>}
       {cloudyExample && <p className="meta">18 July UTC · Sentinel-2 at 05:15, NISAR at 13:11. Radar passed the mask across {pct(observation.coveragePct)} of the site. Sentinel-2 retained 0 of 31,160 site pixel centers at 20 m. Every tested center was classified as high-probability cloud in the Sentinel-2 Scene Classification Layer. This unmasked RGB view uses a shared contrast stretch of the actual visible bands to reveal cloud detail. The cloud classification is a separate quality result. <a href="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_44PMV_20260718_0_L2A" target="_blank" rel="noreferrer">Sentinel-2 source</a>{cloudy.value && <> · <a href={cloudy.value.source} target="_blank" rel="noreferrer">Red band source</a></>}</p>}
       {showCloudImage && !cloudy.value && <p role="status">{cloudy.failed ? "Sentinel-2 image unavailable." : "Loading Sentinel-2 true color…"}</p>}
-      {radarLayer && !opticalMap && !showCloudImage && <div className="legend" aria-label="Backscatter legend">
+      {radarLayer && !opticalMap && <div className="legend" aria-label="Backscatter legend">
         <p>{difference ? 'Later − earlier γ₀' : `${pol} gamma-zero (γ₀)`} · dB</p><div className={`colorbar ${difference ? 'change' : ''}`} />
         <div><span>{radarLayer.min} dB{difference && ' · weaker'}</span>{difference && <span>0 · near zero</span>}<span>{radarLayer.max} dB{difference && ' · stronger'}</span></div>
       </div>}

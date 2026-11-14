@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 export const chapters = [
   ['A wetland worth observing', 'Pallikaranai Marsh sits within Chennai’s urban landscape. The ivory Ramsar outline marks the designated site. Repeated observations establish where this baseline can be measured.'],
-  ['The observation challenge', 'On July 18, Sentinel-2’s cloud mask excluded the entire Ramsar site. The Sentinel-2 image uses enhanced contrast to show the cloud blanket. Switch to NISAR backscatter to see what radar measured later that day. A clearer July 15 optical view adds natural color and spectral context in Chapter 5.'],
+  ['The observation challenge', 'On July 18, Sentinel-2’s cloud mask excluded the entire Ramsar site. The Sentinel-2 image uses enhanced contrast to show the cloud blanket. Drag the divider to compare it with NISAR backscatter from later that day. A clearer July 15 optical view adds natural color and spectral context in Chapter 5.'],
   ['What radar sees', 'The July 6 NISAR image shows gamma-zero backscatter in dB. HH and HV describe the transmitted and received polarizations. The footprint shows where measurements passed the data screen.'],
   ['Every change leaves a trace', 'Drag the divider to compare July 6 and 18 on one dB scale. Try the difference layer to see later minus earlier backscatter. Changes in roughness, moisture and vegetation structure can all affect the radar return.'],
   ['Investigate the evidence', 'The selected location shows native radar values. The July 15 optical image and antecedent rainfall give separately dated context. Local field observations would help resolve the cause of the radar difference.'],
