@@ -4,7 +4,7 @@ import { asset, observationDate, type Catalog, type LonLat, type Polarization } 
 import { RadarMap } from './Map'
 import { Measurements, db, type SampleCatalog } from './Inspection'
 import { RainfallContext, type Rainfall } from './RainfallContext'
-import type { OpticalCatalog } from './context'
+import type { ContextRaster, OpticalCatalog } from './context'
 import { Tour } from './Tour'
 import './style.css'
 
@@ -52,6 +52,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const [infrastructure, setInfrastructure] = useState(() => initialTour() !== null)
   const [opticalLayer, setOpticalLayer] = useState('rgb')
   const sentinel = useAsset<OpticalCatalog>('context/sentinel/manifest.json')
+  const cloudy = useAsset<ContextRaster & { source: string }>('context/sentinel/2026-07-18-cloudy-rgb.json')
   const rainfall = useAsset<Rainfall>('context/rainfall.json')
   const samples = useAsset<SampleCatalog>('data/samples.json')
   const group = catalog.groups[groupIndex]
@@ -69,14 +70,14 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   // July 18 T44PMV SCL contained only class 9 over the site (31,160 centers).
   // See research/sentinel_july_screen.csv for the source and native quality counts.
   const cloudyExample = step === 1 && observation.date.startsWith('2026-07-18')
-  const showCloudMask = cloudyExample && display === 'reference'
+  const showCloudImage = cloudyExample && display === 'reference'
   const difference = comparing && display === 'difference'
   const radarLayer = difference ? pair.layers[pol] : comparing ? later?.layers[pol] : observation.layers[pol]
   const opticalRaster = useMemo(() => optical ? {
     url: opticalIndex?.assets[opticalLayer.toLowerCase()] ?? optical.assets.rgb,
     coordinates: opticalIndex?.coordinates ?? optical.coordinates,
   } : undefined, [optical, opticalIndex, opticalLayer])
-  const raster = display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
+  const raster = showCloudImage ? cloudy.value : display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
   const swipe = comparing && display === 'swipe' && earlier && later ? {
     raster: earlier.layers[pol], left: shortDate(earlier.date), right: shortDate(later.date),
   } : sensorSwipe && optical ? {
@@ -88,7 +89,7 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   const radarCoverage = observedSupport.coverageUrl
   const radarMissing = radarCoverage.replace('/coverage-', '/missing-')
   const coverage = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-coverage.geojson` : radarCoverage
-  const missing = showCloudMask ? catalog.site.boundaryUrl : opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-missing.geojson` : radarMissing
+  const missing = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-missing.geojson` : radarMissing
   const measured = useMemo(() => comparing && earlier && later ? [earlier, later] : [observation], [comparing, earlier, later, observation])
   const median = comparing ? pair.fixedFootprint[pol].median : null
 
@@ -137,10 +138,10 @@ function Workspace({ catalog }: { catalog: Catalog }) {
   return <main className={`explorer ${step === null ? '' : 'tour-active'}`}>
     <RadarMap site={catalog.site} raster={raster} swipe={swipe} optical={opticalMap || display === 'reference'}
       opacity={opacity} coverage={footprint === 'valid' ? coverage : undefined}
-      missing={showCloudMask || footprint === 'missing' ? missing : undefined}
+      missing={footprint === 'missing' ? missing : undefined}
       leftCoverage={sensorSwipe && footprint === 'valid' ? radarCoverage : undefined}
       leftMissing={sensorSwipe && footprint === 'missing' ? radarMissing : undefined}
-      selected={location} onInspect={inspect} infrastructure={infrastructure} />
+      hideBasemap={showCloudImage} selected={location} onInspect={inspect} infrastructure={infrastructure} />
     <header className="brand floating"><span className="brand-icon" aria-hidden="true">≋</span>
       <div><h1>Neerthadam <span lang="ta">நீர்த்தடம்</span></h1><p>Pallikaranai Marsh · Chennai</p></div>
     </header>
@@ -179,8 +180,8 @@ function Workspace({ catalog }: { catalog: Catalog }) {
         <button type="button" aria-pressed={difference} onClick={() => setDisplay('difference')}>Difference</button>
       </div>}
       {cloudyExample && <div className="toggle-row" aria-label="July 18 map view">
-        <button type="button" aria-pressed={showCloudMask} onClick={() => setDisplay('reference')}>Sentinel-2 cloud mask</button>
-        <button type="button" aria-pressed={!showCloudMask} onClick={() => setDisplay('radar')}>NISAR backscatter</button>
+        <button type="button" aria-pressed={showCloudImage} onClick={() => setDisplay('reference')}>Sentinel-2 true color</button>
+        <button type="button" aria-pressed={!showCloudImage} onClick={() => setDisplay('radar')}>NISAR backscatter</button>
       </div>}
       {mode === 'Investigate' && !cloudyExample && <div className="toggle-row">
         <button type="button" aria-pressed={display === 'radar'} onClick={() => setDisplay('radar')}>Radar</button>
@@ -196,8 +197,9 @@ function Workspace({ catalog }: { catalog: Catalog }) {
       {sensorSwipe && optical && !cloudyExample && <p className="meta">Radar {pct(observation.coveragePct)} of site area · optical RGB {pct(optical.coveragePercent)} of 10 m site pixel centers. Acquisitions are separately dated.</p>}
       {opticalMap && optical && <p className="meta">{pct(opticalIndex?.coveragePercent ?? optical.coveragePercent)} usable site pixel centers · {opticalIndex?.resolutionMeters ?? optical.resolutionMeters} m posting.
         {opticalIndex?.formula && ` ${opticalLayer} (unitless, −1 to 1) · ${opticalIndex.formula}`}</p>}
-      {cloudyExample && <p className="meta">18 July UTC · Sentinel-2 at 05:15, NISAR at 13:11. Radar passed the mask across {pct(observation.coveragePct)} of the site. Sentinel-2 retained 0 of 31,160 site pixel centers at 20 m. Every tested center was classified as high-probability cloud in the Sentinel-2 Scene Classification Layer. The amber fill summarizes that result inside the Ramsar boundary. The background is reference imagery. <a href="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_44PMV_20260718_0_L2A" target="_blank" rel="noreferrer">Sentinel-2 source</a></p>}
-      {radarLayer && !opticalMap && !showCloudMask && <div className="legend" aria-label="Backscatter legend">
+      {cloudyExample && <p className="meta">18 July UTC · Sentinel-2 at 05:15, NISAR at 13:11. Radar passed the mask across {pct(observation.coveragePct)} of the site. Sentinel-2 retained 0 of 31,160 site pixel centers at 20 m. Every tested center was classified as high-probability cloud in the Sentinel-2 Scene Classification Layer. The near-white image is the actual unmasked Sentinel-2 true-color crop. The cloud classification is a separate quality result. <a href="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_44PMV_20260718_0_L2A" target="_blank" rel="noreferrer">Sentinel-2 source</a>{cloudy.value && <> · <a href={cloudy.value.source} target="_blank" rel="noreferrer">True-color source raster</a></>}</p>}
+      {showCloudImage && !cloudy.value && <p role="status">{cloudy.failed ? "Sentinel-2 image unavailable." : "Loading Sentinel-2 true color…"}</p>}
+      {radarLayer && !opticalMap && !showCloudImage && <div className="legend" aria-label="Backscatter legend">
         <p>{difference ? 'Later − earlier γ₀' : `${pol} gamma-zero (γ₀)`} · dB</p><div className={`colorbar ${difference ? 'change' : ''}`} />
         <div><span>{radarLayer.min} dB{difference && ' · weaker'}</span>{difference && <span>0 · near zero</span>}<span>{radarLayer.max} dB{difference && ' · stronger'}</span></div>
       </div>}

@@ -29,7 +29,7 @@ type Props = {
   coverage?: string; missing?: string; swipe?: Swipe
   leftCoverage?: string; leftMissing?: string
   selected?: LonLat; onInspect: (point: LonLat) => void
-  infrastructure: boolean
+  infrastructure: boolean; hideBasemap?: boolean
 }
 
 function padding() {
@@ -88,7 +88,7 @@ function addInfrastructure(view: maplibre.Map) {
     paint: { 'line-color': '#7ccaff', 'line-width': 2 } }, 'site-outline')
 }
 
-export function RadarMap({ site, raster, optical, opacity, coverage, missing, leftCoverage, leftMissing, swipe, selected, onInspect, infrastructure }: Props) {
+export function RadarMap({ site, raster, optical, opacity, coverage, missing, leftCoverage, leftMissing, swipe, selected, onInspect, infrastructure, hideBasemap }: Props) {
   const shell = useRef<HTMLDivElement>(null)
   const primaryNode = useRef<HTMLDivElement>(null)
   const overlayNode = useRef<HTMLDivElement>(null)
@@ -169,8 +169,9 @@ export function RadarMap({ site, raster, optical, opacity, coverage, missing, le
     if (!ready || !primary.current) return
     setPrimaryError(false)
     rasterLayer(primary.current, raster, opacity)
+    primary.current.setLayoutProperty('satellite', 'visibility', hideBasemap ? 'none' : 'visible')
     primary.current.setPaintProperty('satellite', 'raster-saturation', optical ? 0 : -.58)
-  }, [ready, raster, opacity, optical])
+  }, [ready, raster, opacity, optical, hideBasemap])
 
   const leftRaster = swipe?.raster
   useEffect(() => {
