@@ -23,7 +23,7 @@ export type Comparison = {
 }
 export type Group = {
   id: string; label: string; maturity: 'provisional' | 'validated'; frequency: 'A' | 'B'
-  centerFrequencyHz: number; spacingM: number; track: number; frame: number
+  centerFrequencyHz: number | null; qualityScreen?: 'harmony'; spacingM: number; track: number; frame: number
   direction: string; release: string; footprintUrl: string; coveragePct: number
   notes: string[]; observations: Observation[]; comparisons: Comparison[]
 }

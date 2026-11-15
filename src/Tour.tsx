@@ -1,25 +1,28 @@
 import { useEffect, useRef } from 'react'
 
-export const chapters = [
-  ['A wetland worth observing', 'Pallikaranai Marsh sits within Chennai’s urban landscape. The ivory Ramsar outline marks the designated site. Repeated observations establish where this baseline can be measured.'],
-  ['The observation challenge', 'On July 18, Sentinel-2’s cloud mask excluded the entire Ramsar site. The Sentinel-2 image uses enhanced contrast to show the cloud blanket. Drag the divider to compare it with NISAR backscatter from later that day. A clearer July 15 optical view adds natural color and spectral context in Chapter 5.'],
-  ['What radar sees', 'The July 6 false-color image encodes HH in red, HV in green, and their dB contrast in blue. The colors describe radar scattering. The footprint shows where measurements passed the data screen.'],
-  ['Every change leaves a trace', 'Drag the divider to compare the July 6 and 18 composites on identical color scales. Try HH difference to see measured later-minus-earlier backscatter in dB. Changes in roughness, moisture and vegetation structure can all affect the radar return.'],
-  ['Investigate the evidence', 'The selected location shows native HH and HV, their contrast, and available temporal differences. The July 15 optical image and antecedent rainfall give separately dated context. Local field observations would help resolve the cause of the radar difference.'],
-  ['Your workspace', 'Use Observe to select dates, Compare to review compatible pairs, and Investigate to inspect measurements alongside environmental context. Click the map to start an inspection.'],
+const chapters = [
+  ['A Wetland Surrounded by a City', 'The lime outline marks the Ramsar site. Amber footprints show mapped buildings, and cyan lines trace mapped waterways. The designation covers part of a wider wetland landscape.'],
+  ['Why Radar?', 'Radar records scattering through most clouds. Use the divider to see how cloud obscured the optical image of the site.'],
+  ['Reading the Radar Landscape', 'Open the labeled building and channel to see the independent map sources. Red shows HH, green shows HV, and blue shows their difference. Similar colors can occur over different landscapes.'],
+  ['Watching the Marsh Through Time', 'Step through the archive with the timeline. Playback uses aligned Harmony crops with shared coverage. Repeated observations can reveal patterns worth investigating.'],
+  ['Move Between Observations', 'Drag the timeline slider or use the arrow keys to revisit an acquisition. Moisture, roughness, vegetation structure, viewing conditions and processing can all affect radar appearance.'],
+  ['Explore Freely', 'Use the slider to choose a date or play a compatible sequence. Use Layers to switch views and show landscape labels. The radar legend explains the colors, and Imagery Details records how the image was made.'],
 ]
 
-export function Tour({ step, onStep, onComplete }: { step: number; onStep: (step: number) => void; onComplete: () => void }) {
+export function Tour({ step, onStep, onComplete, context }: {
+  step: number; onStep: (step: number) => void; onComplete: () => void; context?: string
+}) {
   const heading = useRef<HTMLHeadingElement>(null)
-  useEffect(() => { heading.current?.focus() }, [step])
+  useEffect(() => { heading.current?.focus({ preventScroll: true }) }, [step])
   return <section className="tour floating" aria-labelledby="tour-heading">
-    <span className="kicker">Guided tour · {step + 1} / {chapters.length}</span>
+    <div className="tour-progress"><span>Guided tour · {step + 1} / {chapters.length}</span>
+      <progress max={chapters.length} value={step + 1} aria-label="Tour progress" /></div>
     <h2 id="tour-heading" ref={heading} tabIndex={-1}>{chapters[step][0]}</h2>
-    <p>{chapters[step][1]}</p>
+    <p>{chapters[step][1]}{context && <> {context}</>}</p>
     <div className="tour-actions">
       <button type="button" disabled={step === 0} onClick={() => onStep(step - 1)}>Back</button>
       <button type="button" className="primary" onClick={() => step === chapters.length - 1 ? onComplete() : onStep(step + 1)}>
-        {step === chapters.length - 1 ? 'Enter workspace' : 'Continue'}
+        {step === chapters.length - 1 ? 'Enter workspace' : 'Next'}
       </button>
     </div>
   </section>

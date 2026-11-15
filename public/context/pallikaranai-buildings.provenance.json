@@ -1,0 +1,12 @@
+{
+  "source": "OpenStreetMap via OpenFreeMap and OpenMapTiles",
+  "sourceUrl": "https://tiles.openfreemap.org/planet",
+  "snapshot": "20261101_080013_pt",
+  "sourceLayer": "building",
+  "zoom": 13,
+  "tileBounds": [5920, 3797, 5922, 3800],
+  "clipBounds": [80.19, 12.86, 80.26, 12.99],
+  "license": "https://www.openstreetmap.org/copyright",
+  "method": "Extract building polygons, keep features by representative point in the source tile interior to reduce buffer duplicates, clip to local bounds, keep polygon areas at least approximately 50 square meters, topology-preserving simplification at 0.000009 degrees and coordinate precision of six decimals, drop invalid output geometries.",
+  "limitations": "Overview display only. OpenStreetMap completeness varies. No temporal or land-cover inference."
+}

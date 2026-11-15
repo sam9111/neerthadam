@@ -1,0 +1,59 @@
+[
+  {
+    "id": "ramsar",
+    "point": [
+      80.22048445691425,
+      12.927845763294776
+    ],
+    "title": "Ramsar site boundary",
+    "description": "The lime outline follows the designated Pallikaranai Marsh Ramsar site.",
+    "source": "Ramsar Sites Information Service",
+    "sourceUrl": "https://rsis.ramsar.org/ris/2481",
+    "evidence": "Site record 2481",
+    "verification": "independently mapped",
+    "limitation": "The designation covers part of the wider wetland landscape."
+  },
+  {
+    "id": "buildings",
+    "point": [
+      80.23253041412553,
+      12.9446405
+    ],
+    "title": "Built-up landscape",
+    "description": "This label anchors to a mapped building footprint east of the Ramsar site. Amber polygons trace mapped structures in the surrounding city.",
+    "source": "OpenStreetMap via OpenFreeMap",
+    "sourceUrl": "context/pallikaranai-buildings.provenance.json",
+    "evidence": "Building snapshot · 1 Nov 2026",
+    "verification": "independently mapped",
+    "limitation": "Mapped footprints reflect the source snapshot. Building dates and changes across radar observations are unknown."
+  },
+  {
+    "id": "channel",
+    "point": [
+      80.23438655354082,
+      12.920344252204309
+    ],
+    "title": "Okkiyam Maduvu",
+    "description": "This independently mapped channel runs east from the marsh landscape. Follow the cyan line to see its mapped course.",
+    "source": "OpenStreetMap · Okkiyam Maduvu",
+    "sourceUrl": "https://www.openstreetmap.org/way/201560881",
+    "evidence": "Way v4 · 20 Dec 2023",
+    "verification": "independently mapped",
+    "limitation": "The mapped geometry gives the channel location. Current flow and connectivity require separate evidence."
+  },
+  {
+    "id": "return",
+    "point": [
+      80.21916057800559,
+      12.901746738140139
+    ],
+    "title": "Strong radar return",
+    "description": "The selected pixel has strong displayed HH and HV contributions. Both radar channels return relatively strong signals here.",
+    "source": "NISAR Frequency A composite",
+    "sourceUrl": "data/provisional-t149-f82-descending-p05023-r05.02.3-dhdh-a-4e+07/2026-07-06-rgb.png",
+    "evidence": "6 Jul 2026 · source RGB pixel (222, 167, 172)",
+    "verification": "composite pixel",
+    "limitation": "Surface type and environmental cause require independent evidence.",
+    "observationId": "provisional-t149-f82-descending-p05023-r05.02.3-dhdh-a-4e+07/NISAR_L2_PR_GCOV_024_149_D_082_4005_DHDH_A_20260706T131105_20260706T131137_P05023_N_F_J_001"
+  }
+]

@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { asset, observationDate, type Catalog, type LonLat } from './catalog'
-import { RadarMap } from './Map'
-import { Measurements, db, type SampleCatalog } from './Inspection'
-import { RainfallContext, type Rainfall } from './RainfallContext'
+import { asset, observationDate, type Catalog, type Group } from './catalog'
+import { RadarMap, type Annotation } from './Map'
+import {
+  applyHarmonySeries, buildArchive, defaultSeries, parseCatalog, playbackSequence,
+  type Acquisition, type CompositeCatalog, type HarmonySeriesManifest, type ProductMetadata, type SampleCatalog, type Series,
+} from './archive'
 import type { ContextRaster, OpticalCatalog } from './context'
+import { loadRaster } from './RasterSwipe'
+import { RadarLegend, type RadarSwatches } from './RadarLegend'
 import { Tour } from './Tour'
 import './style.css'
 
-type Mode = 'Observe' | 'Compare' | 'Investigate'
-type Display = 'radar' | 'reference' | 'swipe' | 'difference' | 'optical' | 'sensor-swipe'
-type CompositeCatalog = { ranges: Record<'red' | 'green' | 'blue', [number, number]>; groups: Record<string, Record<string, ContextRaster>> }
-type Footprint = 'off' | 'valid' | 'missing'
-const seenKey = 'neerthadam-evidence-tour-v1'
+const viewLabel = { A: 'Detailed Marsh', B: 'Wider Landscape' }
+const seenKey = 'neerthadam-landscape-tour-v2'
 const pct = (value: number) => `${Number(value.toFixed(2))}%`
 const shortDate = (date: string) => observationDate(date, { year: undefined })
+const dateKey = (date: string) => new Date(date).toISOString().slice(0, 10)
+const noAnnotations: Annotation[] = []
 
 function useAsset<T>(path: string) {
   const [result, setResult] = useState<{ value?: T; failed?: boolean }>({})
@@ -35,249 +38,293 @@ function initialTour() {
   try { return localStorage.getItem(seenKey) ? null : 0 } catch { return 0 }
 }
 
-function Workspace({ catalog }: { catalog: Catalog }) {
-  const julyIndex = catalog.groups.findIndex(group => group.track === 149 && group.frequency === 'A' &&
-    group.observations[0]?.date.startsWith('2026-07-06'))
-  const defaultGroup = Math.max(julyIndex, 0)
+type Entry = { group: Series; item: Acquisition }
+type CloudExample = ContextRaster & { source: string; acquiredAt: string; usable: number; tested: number }
+
+function Workspace({ site, archive, ranges }: {
+  site: Catalog['site']; archive: Series[]; ranges: CompositeCatalog['ranges']
+}) {
+  const defaults = useMemo(() => ({ A: defaultSeries(archive, 'A'), B: defaultSeries(archive, 'B') }), [archive])
+  const initial = defaults.A ?? defaults.B
+  const [track, setTrack] = useState<number | undefined>(initial?.group.track)
+  const [selectedId, setSelectedId] = useState(initial?.sequence[0]?.acquisitionId)
   const [step, setStep] = useState<number | null>(initialTour)
-  const [mode, setMode] = useState<Mode>('Observe')
-  const [display, setDisplay] = useState<Display>(() => initialTour() === null ? 'radar' : 'reference')
-  const [groupIndex, setGroup] = useState(defaultGroup)
-  const [dateIndex, setDate] = useState(0)
-  const [pairIndex, setPair] = useState(0)
-  const [footprint, setFootprint] = useState<Footprint>('off')
-  const [opacity, setOpacity] = useState(1)
-  const [location, setLocation] = useState<LonLat>()
-  const [contextOpen, setContextOpen] = useState(false)
-  const [infrastructure, setInfrastructure] = useState(() => initialTour() !== null)
-  const [opticalLayer, setOpticalLayer] = useState('rgb')
-  const sentinel = useAsset<OpticalCatalog>('context/sentinel/manifest.json')
-  const cloudy = useAsset<ContextRaster & { source: string }>('context/sentinel/2026-07-18-cloudy-rgb.json')
-  const rainfall = useAsset<Rainfall>('context/rainfall.json')
-  const samples = useAsset<SampleCatalog>('data/samples.json')
-  const composites = useAsset<CompositeCatalog>('data/composites.json')
-  const group = catalog.groups[groupIndex]
-  const images = composites.value?.groups[group.id]
-  const observation = group.observations[dateIndex]
-  const pair = group.comparisons[pairIndex]
-  const earlier = group.observations.find(item => item.id === pair?.earlierId)
-  const later = group.observations.find(item => item.id === pair?.laterId)
-  const comparable = Boolean(pair && earlier && later)
-  const comparing = mode === 'Compare' && comparable
-  const observedComposite = images?.[observation.id]
-  const earlierComposite = earlier && images?.[earlier.id]
-  const laterComposite = later && images?.[later.id]
-  const optical = sentinel.value?.observations[0]
-  const opticalIndex = sentinel.value?.derivedProducts.find(item => item.kind === opticalLayer)
-  const sensorSwipe = display === 'sensor-swipe'
-  const opticalMap = display === 'optical'
-  // July 18 T44PMV SCL contained only class 9 over the site (31,160 centers).
-  // See research/sentinel_july_screen.csv for the source and native quality counts.
-  const cloudyExample = step === 1 && observation.date.startsWith('2026-07-18')
-  const showCloudImage = cloudyExample && sensorSwipe
-  const difference = comparing && display === 'difference'
-  const differenceLayer = difference ? pair.layers.HH : undefined
-  const compositeLayer = comparing ? laterComposite : observedComposite
-  const radarLayer = differenceLayer ?? compositeLayer
-  const opticalRaster = useMemo(() => optical ? {
-    url: opticalIndex?.assets[opticalLayer.toLowerCase()] ?? optical.assets.rgb,
-    coordinates: opticalIndex?.coordinates ?? optical.coordinates,
-  } : undefined, [optical, opticalIndex, opticalLayer])
-  const raster = showCloudImage ? cloudy.value ?? radarLayer : display === 'reference' ? undefined : opticalMap || sensorSwipe ? opticalRaster : radarLayer
-  const swipe = comparing && display === 'swipe' && earlier && later && earlierComposite && laterComposite ? {
-    raster: earlierComposite, left: shortDate(earlier.date), right: shortDate(later.date),
-  } : showCloudImage && cloudy.value && observedComposite ? {
-    raster: observedComposite, left: 'NISAR · 13:11 UTC', right: 'Sentinel-2 · 05:15 UTC',
-  } : sensorSwipe && optical && observedComposite && !cloudyExample ? {
-    raster: observedComposite, left: `NISAR · ${shortDate(observation.date)}`,
-    right: `Sentinel-2 · ${shortDate(optical.acquiredAt)}`,
+  const [playAnchor, setPlayAnchor] = useState<string>()
+  const [cameraRevision, setCameraRevision] = useState(0)
+  const [layersOpen, setLayersOpen] = useState(false)
+  const [legendOpen, setLegendOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [overlays, setOverlays] = useState({ buildings: true, waterways: true, boundary: true, labels: false, optical: false })
+  const swatches = useAsset<RadarSwatches>('context/radar-swatches.json').value
+  const annotations = useAsset<Annotation[]>('context/landscape-annotations.json').value
+  const optical = useAsset<OpticalCatalog>('context/sentinel/manifest.json').value?.observations[0]
+  const cloudy = useAsset<CloudExample>('context/sentinel/cloud-example.json')
+  const entries = useMemo(() => archive.flatMap(group => group.observations.map(item => ({ group, item })))
+    .sort((a, b) => Date.parse(a.item.timestamp) - Date.parse(b.item.timestamp)), [archive])
+  const active = entries.find(entry => entry.item.acquisitionId === selectedId) ?? entries.find(entry => entry.item.imagery)
+  const group = active?.group
+  const observation = active?.item
+  const frequency = group?.frequency ?? 'A'
+  const selectedDay = observation ? dateKey(observation.timestamp) : undefined
+  const timeline = useMemo(() => {
+    const dates = new Map<string, Entry[]>()
+    for (const entry of entries) {
+      if ((track !== undefined && entry.group.track !== track) ||
+          entry.group.frequency !== frequency || !entry.item.imagery) continue
+      const day = dateKey(entry.item.timestamp)
+      const products = dates.get(day) ?? []
+      products.push(entry)
+      dates.set(day, products)
+    }
+    return Array.from(dates, ([day, products]) => ({ day, products }))
+  }, [entries, track, frequency])
+  const timelineIndex = timeline.findIndex(date => date.day === selectedDay)
+  const alternatives = timeline[timelineIndex]?.products ?? []
+  const sequence = useMemo(() => group && observation ? playbackSequence(group, playAnchor ?? observation.id) : [],
+    [group, playAnchor, observation?.id])
+  const showCloud = step === 1 && overlays.optical ? cloudy.value : undefined
+  const cloudyRadar = showCloud ? entries.find(({ item }) =>
+    item.frequency === 'A' && item.imagery && dateKey(item.timestamp) === dateKey(showCloud.acquiredAt))?.item : undefined
+  useEffect(() => {
+    if (cloudyRadar) setSelectedId(cloudyRadar.acquisitionId)
+  }, [cloudyRadar])
+  const opticalRaster = useMemo(() => optical ? { url: optical.assets.rgb, coordinates: optical.coordinates } : undefined, [optical])
+  const cloudyExample = showCloud && cloudyRadar?.imagery ? showCloud : undefined
+  const opticalFrame = overlays.optical ? cloudyExample ?? opticalRaster : undefined
+  const radarFrame = cloudyExample ? cloudyRadar : observation
+  const opticalDate = cloudyExample?.acquiredAt ?? optical?.acquiredAt
+  const swipe = opticalFrame && opticalDate && radarFrame?.imagery ? {
+    raster: radarFrame.imagery,
+    left: `NISAR · ${shortDate(radarFrame.timestamp)}`,
+    right: `Sentinel-2 · ${shortDate(opticalDate)}`,
   } : undefined
-  const observedSupport = comparing ? pair : observation
-  const opticalMaskBase = optical ? `context/sentinel/${optical.acquiredAt.slice(0, 10)}` : ''
-  const radarCoverage = observedSupport.coverageUrl
-  const radarMissing = radarCoverage.replace('/coverage-', '/missing-')
-  const coverage = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-coverage.geojson` : radarCoverage
-  const missing = opticalMap || sensorSwipe ? optical && `${opticalMaskBase}-missing.geojson` : radarMissing
-  const measured = useMemo(() => comparing && earlier && later ? [earlier, later] : [observation], [comparing, earlier, later, observation])
-  const inspected = useMemo(() => mode === 'Investigate' && comparable && earlier && later ? [earlier, later] : measured,
-    [mode, comparable, earlier, later, measured])
+  const raster = swipe ? opticalFrame : observation?.imagery ?? undefined
 
-  function chooseMode(next: Mode) {
-    setMode(next)
-    setDisplay(next === 'Compare' ? 'swipe' : 'radar')
-    setContextOpen(false)
-    setFootprint(next === 'Compare' ? 'valid' : 'off')
+  function manualSelect(id: string) {
+    setPlayAnchor(undefined)
+    setSelectedId(id)
   }
 
-  function tourStep(next: number) {
-    setStep(next)
-    setGroup(defaultGroup)
-    setDate(next === 1 || next === 3 ? Math.min(1, catalog.groups[defaultGroup].observations.length - 1) : 0)
-    setPair(0)
-    setOpacity(1)
-    setOpticalLayer('rgb')
-    setInfrastructure(next === 0 || next === 4)
-    setMode(next === 3 ? 'Compare' : next === 1 || next === 4 ? 'Investigate' : 'Observe')
-    setDisplay(next === 0 ? 'reference' : next === 1 ? 'sensor-swipe' : next === 3 ? 'swipe' : next === 4 ? 'optical' : 'radar')
-    setFootprint(next === 2 || next === 3 ? 'valid' : 'off')
-    setLocation(next === 4 ? catalog.site.center : undefined)
-    setContextOpen(next === 4)
+  function selectDate(index: number) {
+    const available = timeline[index]?.products
+    const next = available?.find(entry => entry.group.id === group?.id) ?? available?.[0]
+    if (next) manualSelect(next.item.acquisitionId)
   }
 
-  function finishTour() {
-    try { localStorage.setItem(seenKey, 'done') } catch { /* Completion remains available in memory. */ }
-    setStep(null)
-    chooseMode('Observe')
+  const previous = timelineIndex - 1
+  const next = timelineIndex + 1 < timeline.length ? timelineIndex + 1 : -1
+  const sliderLabels = timeline.length > 5 ? [timeline[0], timeline.at(-1)!] : timeline
+
+  useEffect(() => {
+    if (!observation) return
+    let current = true
+    let timer: number | undefined
+    const position = sequence.findIndex(item => item.id === observation.id)
+    const neighbors = [timeline[previous]?.products[0]?.item,
+      timeline[next]?.products[0]?.item,
+      sequence[(position + 1) % sequence.length],
+      sequence[(position + sequence.length - 1) % sequence.length]]
+    for (const item of neighbors) {
+      const image = item?.imagery
+      if (image) void loadRaster(image).catch(() => {})
+    }
+    if (playAnchor && sequence.length > 1 && observation.imagery) {
+      void loadRaster(observation.imagery).catch(() => undefined).then(() => {
+        if (current) timer = window.setTimeout(() => {
+          setSelectedId(sequence[(position + 1) % sequence.length].acquisitionId)
+        }, 2200)
+      })
+    }
+    return () => { current = false; window.clearTimeout(timer) }
+  }, [observation, sequence, playAnchor, timeline, previous, next, frequency])
+
+  function togglePlay() {
+    if (playAnchor) { setPlayAnchor(undefined); return }
+    if (!observation || sequence.length < 2) return
+    setPlayAnchor(observation.id)
   }
 
-  function selectGroup(index: number) {
-    setGroup(index)
-    setDate(0)
-    setPair(0)
+  function changeFrequency(nextFrequency: Group['frequency']) {
+    const sameDate = timeline[timelineIndex]?.products.filter(entry => entry.group.frequency === nextFrequency && entry.item.imagery)
+    const sameGeometry = sameDate?.find(entry => entry.group.track === group?.track && entry.group.frame === group.frame)
+    const sameDay = sameGeometry ?? sameDate?.[0]
+    const inTrack = entries.find(entry => entry.item.imagery && entry.group.frequency === nextFrequency && entry.group.track === track)
+    const nextId = sameDay?.item.acquisitionId ?? (track === undefined
+      ? defaults[nextFrequency]?.sequence[0]?.acquisitionId : inTrack?.item.acquisitionId)
+    if (nextId) manualSelect(nextId)
   }
 
-  function inspect(point: LonLat) {
-    if (step !== null && step < 3) return
-    setLocation(point)
-    setContextOpen(true)
+  function changeTrack(nextTrack: number | undefined) {
+    setTrack(nextTrack)
+    if (nextTrack === undefined || nextTrack === group?.track) return
+    const available = entries.filter(entry => entry.item.imagery && entry.group.track === nextTrack)
+    const preferred = available.find(entry => entry.group.frequency === frequency) ?? available[0]
+    if (preferred) manualSelect(preferred.item.acquisitionId)
   }
 
-  const locked = step !== null && step < 5
-  return <main className={`explorer ${step === null ? '' : 'tour-active'}`}>
-    <RadarMap site={catalog.site} raster={raster} swipe={swipe} optical={opticalMap || display === 'reference'}
-      opacity={opacity} coverage={footprint === 'valid' ? coverage : undefined}
-      missing={footprint === 'missing' ? missing : undefined}
-      leftCoverage={sensorSwipe && footprint === 'valid' ? radarCoverage : undefined}
-      leftMissing={sensorSwipe && footprint === 'missing' ? radarMissing : undefined}
-      hideBasemap={showCloudImage} selected={location} onInspect={inspect} infrastructure={infrastructure} />
-    <header className="brand floating"><span className="brand-icon" aria-hidden="true">≋</span>
-      <div><h1>Neerthadam <span lang="ta">நீர்த்தடம்</span></h1><p>Pallikaranai Marsh · Chennai</p></div>
+  function tourStep(nextStep: number | null) {
+    const defaultObservation = initial?.sequence[0]
+    setStep(nextStep)
+    setTrack(initial?.group.track)
+    setSelectedId(defaultObservation?.acquisitionId)
+    setPlayAnchor(nextStep === 3 && (initial?.sequence.length ?? 0) > 1 ? defaultObservation?.id : undefined)
+    setOverlays({ buildings: true, waterways: true, boundary: true, labels: nextStep === 2, optical: nextStep === 1 })
+    setLegendOpen(nextStep === 2)
+    setDetailsOpen(false)
+    setLayersOpen(false)
+    if (nextStep === 0 || nextStep === 5 || nextStep === null) setCameraRevision(value => value + 1)
+    if (nextStep === null) {
+      try { localStorage.setItem(seenKey, 'done') } catch { /* In-memory completion. */ }
+    }
+  }
+
+  const sensorChapter = step === 1
+  const tourContext = sensorChapter ? !overlays.optical
+    ? 'Enable Optical imagery in Layers to open the divider.'
+    : cloudyExample && cloudyRadar
+    ? `${observationDate(cloudyExample.acquiredAt)} · Sentinel-2 ${cloudyExample.acquiredAt.slice(11, 16)} UTC, NISAR ${cloudyRadar.timestamp.slice(11, 16)} UTC. Cloud screening retained ${cloudyExample.usable.toLocaleString()} of ${cloudyExample.tested.toLocaleString()} tested Sentinel-2 site centers.`
+    : cloudy.failed || showCloud ? 'The archived radar and optical example is unavailable.' : 'Loading the archived cloudy optical example.'
+    : step === 3 ? `${timeline.length} dates in the published archive. ${sequence.length > 1 ? `${sequence.length} observations in this playback sequence.` : 'Compatible playback is unavailable.'}`
+    : undefined
+  const visibleAnnotations = useMemo(() => overlays.labels && !(step === 3 && playAnchor)
+    ? annotations?.filter(item => !item.observationId ||
+      (!overlays.optical && item.observationId === observation?.acquisitionId)) ?? noAnnotations
+    : noAnnotations, [annotations, overlays.labels, overlays.optical, step, playAnchor, observation?.acquisitionId])
+  const viewSwitch = [
+    ['boundary', 'Ramsar site boundary'], ['buildings', 'Buildings'], ['waterways', 'Waterways'],
+    ['optical', 'Optical imagery'], ['labels', 'Landscape labels'],
+  ] as const
+
+  return <main className={`explorer ${step === null ? '' : `tour-active chapter-${step + 1}`} ${swipe ? 'comparison-open' : ''}`}>
+    <RadarMap site={site} raster={raster} swipe={swipe} cameraRevision={cameraRevision}
+      hideBasemap={Boolean(cloudyExample && swipe)} annotations={visibleAnnotations}
+      buildings={overlays.buildings} waterways={overlays.waterways} boundary={overlays.boundary} />
+    <header className="brand floating">
+      <div className="brand-mark" aria-hidden="true"><i /><i /><i /></div>
+      <div><h1>Neerthadam <span lang="ta">நீர்த்தடம்</span></h1><p>Pallikaranai Marsh <span>· Chennai, India</span></p></div>
     </header>
-    <nav className="view-switch floating" aria-label="Workspace">
-      {(['Observe', 'Compare', 'Investigate'] as const).map(item => <button key={item} type="button"
-        disabled={locked} aria-pressed={mode === item} onClick={() => chooseMode(item)}>{item}</button>)}
-      <button type="button" disabled={step !== null} onClick={() => tourStep(0)}>Tour</button>
-    </nav>
+    <div className="view-switch floating" aria-label="Map controls">
+      <button type="button" aria-expanded={layersOpen} aria-controls="layer-menu" onClick={() => setLayersOpen(!layersOpen)}>Layers</button>
+      <button type="button" title="Replay guided tour" onClick={() => tourStep(0)}>Help</button>
+    </div>
 
-    {step !== 0 && <section className="control-card floating" aria-label="Layer and acquisition controls">
-      <div className="control-heading">
-        <div><h2>{comparing ? 'Radar comparison' : cloudyExample ? '18 July · observation coverage' : sensorSwipe ? 'Radar vs. optical' : opticalMap ? 'Sentinel-2 optical' : 'NISAR backscatter'}</h2>
-          <p>{comparing && earlier && later ? `${shortDate(earlier.date)} – ${observationDate(later.date)}` : opticalMap && optical ? observationDate(optical.acquiredAt) : observationDate(observation.date)}</p></div>
-        <span className={`maturity ${group.maturity}`}>{group.maturity}</span>
-      </div>
-      <p className="meta">L-band {group.frequency} · {group.spacingM} m posting · {group.direction} · Track {group.track} / Frame {group.frame}</p>
-      <div className="controls">
-        <select aria-label="Compatible acquisition group" value={groupIndex} disabled={locked}
-          onChange={event => selectGroup(Number(event.target.value))}>
-          {catalog.groups.map((item, index) => <option key={item.id} value={index}>{shortDate(item.observations[0].date)} · Frequency {item.frequency} · {item.maturity}</option>)}
+    {layersOpen && <section id="layer-menu" className="control-card floating" aria-label="Map layers">
+      <header><h2>Layers</h2><button className="dismiss" type="button" aria-label="Close layers" onClick={() => setLayersOpen(false)}>×</button></header>
+      <fieldset><legend>Radar view</legend>
+        {(['A', 'B'] as const).map(band => <label key={band}>
+          <input type="radio" name="radar-view" checked={frequency === band} disabled={sensorChapter || !entries.some(({ item, group }) => item.imagery && group.frequency === band && (track === undefined || track === group.track))}
+            onChange={() => changeFrequency(band)} />
+          <span>{viewLabel[band]}<small>Frequency {band} · {defaults[band]?.group.spacingM ?? '—'} m</small></span>
+        </label>)}
+      </fieldset>
+      <fieldset><legend>Acquisition track</legend>
+        <select aria-label="Acquisition track" disabled={sensorChapter} value={track ?? 'all'}
+          onChange={event => changeTrack(event.target.value === 'all' ? undefined : Number(event.target.value))}>
+          <option value="all">All tracks</option>
+          {Array.from(new Map(entries.filter(entry => entry.item.imagery)
+            .map(({ group }) => [group.track, group.direction]))).sort(([a], [b]) => a - b)
+            .map(([number, direction]) => <option key={number} value={number}>Track {number} · {direction}</option>)}
         </select>
-        {mode === 'Compare' && pair && <select aria-label="Compatible comparison pair" value={pairIndex} disabled={locked}
-          onChange={event => setPair(Number(event.target.value))}>
-          {group.comparisons.map((item, index) => {
-            const one = group.observations.find(o => o.id === item.earlierId)
-            const two = group.observations.find(o => o.id === item.laterId)
-            return <option key={item.earlierId + item.laterId} value={index}>{one && shortDate(one.date)} – {two && shortDate(two.date)}</option>
-          })}
-        </select>}
-      </div>
-      {mode === 'Compare' && !comparable && <p className="meta" role="status">Comparison unavailable. Dates must share a verified acquisition group, grid and display scale.</p>}
-      {comparing && <div className="toggle-row">
-        <button type="button" aria-pressed={!difference} onClick={() => setDisplay('swipe')}>Swipe</button>
-        <button type="button" aria-pressed={difference} onClick={() => setDisplay('difference')}>HH difference</button>
-      </div>}
-      {mode === 'Investigate' && !cloudyExample && <div className="toggle-row">
-        <button type="button" aria-pressed={display === 'radar'} onClick={() => setDisplay('radar')}>Radar</button>
-        <button type="button" aria-pressed={sensorSwipe} onClick={() => { setOpticalLayer('rgb'); setDisplay('sensor-swipe') }}>Radar vs. Optical</button>
-        <button type="button" aria-pressed={opticalMap} onClick={() => setDisplay('optical')}>Optical</button>
-      </div>}
-      {opticalMap && optical && <label className="field">Optical layer<select value={opticalLayer} onChange={event => setOpticalLayer(event.target.value)}>
-        <option value="rgb">True color</option>
-        {sentinel.value?.derivedProducts.filter(item => item.kind === 'NDVI' || item.kind === 'MNDWI').map(item =>
-          <option key={item.id} value={item.kind}>{item.kind}</option>)}
-      </select></label>}
-      {(sensorSwipe || opticalMap) && !optical && !cloudyExample && <p className="meta" role="status">{sentinel.failed ? 'Optical data unavailable.' : 'Loading optical observation…'}</p>}
-      {sensorSwipe && optical && !cloudyExample && <p className="meta">Radar {pct(observation.coveragePct)} of site area · optical RGB {pct(optical.coveragePercent)} of 10 m site pixel centers. Acquisitions are separately dated.</p>}
-      {opticalMap && optical && <p className="meta">{pct(opticalIndex?.coveragePercent ?? optical.coveragePercent)} usable site pixel centers · {opticalIndex?.resolutionMeters ?? optical.resolutionMeters} m posting.
-        {opticalIndex?.formula && ` ${opticalLayer} (unitless, −1 to 1) · ${opticalIndex.formula}`}</p>}
-      {cloudyExample && <p className="meta">18 July UTC · Sentinel-2 at 05:15, NISAR at 13:11. Radar passed the mask across {pct(observation.coveragePct)} of the site. Sentinel-2 retained 0 of 31,160 site pixel centers at 20 m. Every tested center was classified as high-probability cloud in the Sentinel-2 Scene Classification Layer. This unmasked RGB view uses a shared contrast stretch of the actual visible bands to reveal cloud detail. The cloud classification is a separate quality result. <a href="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2B_44PMV_20260718_0_L2A" target="_blank" rel="noreferrer">Sentinel-2 source</a>{cloudy.value && <> · <a href={cloudy.value.source} target="_blank" rel="noreferrer">Red band source</a></>}</p>}
-      {showCloudImage && !cloudy.value && <p role="status">{cloudy.failed ? "Sentinel-2 image unavailable." : "Loading Sentinel-2 true color…"}</p>}
-      {!opticalMap && !difference && <>
-        {!compositeLayer && <p role="status" className="meta">{composites.failed || composites.value ? 'Radar composite unavailable.' : 'Loading radar composite…'}</p>}
-        {composites.value && <details className="layer-details radar-legend">
-          <summary>How to read this image</summary>
-          <p>False-color gamma-zero backscatter. Colors encode scattering characteristics and can vary with moisture, roughness, vegetation structure and noise. Land-cover interpretation requires independent evidence.</p>
-          <ul>{([['red', 'HH'], ['green', 'HV'], ['blue', 'HH − HV']] as const).map(([color, channel]) =>
-            <li key={color}><strong>{color}</strong> · {channel} · {composites.value!.ranges[color].join(' to ')} dB</li>)}</ul>
-          <p>Each channel uses the same clipped linear scale across dates. Transparent pixels lack valid HH or HV. Weak HV can be noise-sensitive, especially in the blue contrast; the display uses the source masks and applies no additional noise-floor screen.</p>
-        </details>}
-      </>}
-      {differenceLayer && <div className="legend" aria-label="HH backscatter difference legend">
-        <p>HH gamma-zero · later − earlier · dB</p><div className="colorbar change" />
-        <div><span>{differenceLayer.min} dB · weaker</span><span>0 · near zero</span><span>{differenceLayer.max} dB · stronger</span></div>
-      </div>}
-      {comparing && <div className="summary" aria-live="polite"><strong>{pct(pair.coveragePct)} common valid site area</strong>
-        <p>Area-weighted medians · {(['HH', 'HV'] as const).map(channel => {
-          const median = pair.fixedFootprint[channel].median
-          return `${channel} ${median === null ? 'unavailable' : db(median)}`
-        }).join(' · ')}</p>
-        <p>Native backscatter differences describe scattering. Their environmental cause remains unverified.</p>
-      </div>}
-      {!cloudyExample && <label className="field">Coverage<select value={footprint} onChange={event => setFootprint(event.target.value as Footprint)}>
-        <option value="off">Hidden</option><option value="valid">{comparing ? 'Common valid footprint' : 'Valid footprint'}</option>
-        <option value="missing">Missing data</option>
-      </select></label>}
-      {footprint !== 'off' && <p className="meta">{footprint === 'valid' ? 'Teal · valid under the applicable mask' : 'Amber · masked or outside valid coverage inside the site'}{opticalMap && opticalLayer !== 'rgb' && ' · Optical footprint is for RGB.'}</p>}
-      <details className="layer-details"><summary>Opacity, metadata and quality</summary>
-        <label className="field">Layer opacity<input type="range" min="0" max="1" step=".05" value={opacity} onChange={event => setOpacity(Number(event.target.value))} /></label>
-        <p>{pct(observedSupport.coveragePct)} valid radar site area · {group.release} · {(group.centerFrequencyHz / 1e9).toFixed(4)} GHz</p>
-        {measured.map(item => <p key={item.id}>{item.date} · {item.provenance ? <a href={item.provenance.downloadUrl} target="_blank" rel="noreferrer">{item.granuleId}</a> : item.granuleId}</p>)}
-        {comparing && <p>{pair.screen}</p>}
-        {group.notes.map(note => <p key={note}>{note}</p>)}
-        <p><a href="https://rsis.ramsar.org/ris/2481" target="_blank" rel="noreferrer">Ramsar Site 2481</a> · ivory designation boundary</p>
-      </details>
-      {mode === 'Investigate' && <div className="toggle-row">
-        <button type="button" aria-expanded={contextOpen} onClick={() => setContextOpen(!contextOpen)}>Evidence panel</button>
-        <button type="button" aria-pressed={infrastructure} onClick={() => setInfrastructure(!infrastructure)}>Roads &amp; waterways</button>
-      </div>}
+      </fieldset>
+      <fieldset><legend>Landscape overlays</legend>
+        {viewSwitch.map(([key, label]) => <label key={key}><input type="checkbox" checked={overlays[key]}
+          disabled={key === 'optical' && !optical && !(sensorChapter && cloudy.value) || key === 'labels' && !annotations}
+          onChange={event => {
+            if (key === 'optical') setPlayAnchor(undefined)
+            setOverlays(state => ({ ...state, [key]: event.target.checked }))
+          }} /> {label}</label>)}
+      </fieldset>
+      {cloudyExample && <p><a href={cloudyExample.source}>Sentinel-2 · {observationDate(cloudyExample.acquiredAt)}</a>
+        {' · '}Cloud example. {cloudyExample.usable.toLocaleString()} of {cloudyExample.tested.toLocaleString()} tested site centers passed screening.</p>}
+      {overlays.optical && optical && !cloudyExample && <p><a href={optical.sourceUrl}>Sentinel-2 · {observationDate(optical.acquiredAt)}</a>
+        {' · '}{pct(optical.coveragePercent)} usable site pixel centers after cloud screening.</p>}
+      {!optical && <p>Optical imagery is unavailable.</p>}
+      <p>Buildings and waterways from OpenStreetMap.</p>
     </section>}
 
-    {step !== 0 && <section className="time-card floating" aria-label="Acquisition timeline">
-      <div className="time-heading"><strong>Acquisition timeline</strong><span>{comparing ? 'Compatible pair' : 'UTC'}</span></div>
-      <div className="date-buttons">{group.observations.map((item, index) => <button key={item.id} type="button"
-        disabled={locked || comparing} aria-pressed={comparing ? measured.includes(item) : dateIndex === index}
-        onClick={() => setDate(index)}>{observationDate(item.date)} <small>{pct(item.coveragePct)} valid</small></button>)}</div>
-    </section>}
+    <RadarLegend frequency={frequency} swatches={swatches} expanded={legendOpen} onToggle={() => setLegendOpen(!legendOpen)} />
 
-    {contextOpen && <aside className="info-card evidence floating" aria-label="Evidence panel">
-      <button className="close" aria-label="Close evidence panel" onClick={() => setContextOpen(false)}>×</button>
-      <h2>{location ? 'Location evidence' : 'Environmental context'}</h2>
-      <h3>Observations</h3>
-      {location ? <>
-        <p>{location[1].toFixed(5)}° N · {location[0].toFixed(5)}° E · {group.maturity} · L-band {group.frequency} · {group.spacingM} m</p>
-        {samples.value || samples.failed ? <Measurements key={`${location.join(',')}:${group.id}:${inspected.map(item => item.id).join(',')}`}
-          point={location} observations={inspected} samples={samples.value?.[group.id]} /> : <p>Loading measurement catalog…</p>}
-        <p>Native gamma-zero in dB. NoData marks locations without a usable sample in the exported raster. HH − HV needs both channels at that date. Temporal differences require valid inputs at both dates. Weak HV can be close to the noise floor, making contrast less reliable.</p>
-      </> : <p>Click the map to inspect native HH/HV measurements.</p>}
-      <h3>Environmental context</h3>
-      {optical && <p><a href={optical.sourceUrl} target="_blank" rel="noreferrer">Sentinel-2 L2A · {observationDate(optical.acquiredAt)}</a>.
-        RGB retains SCL classes 4, 5 and 6. Cloud, shadow and other excluded classes appear transparent. Optical reflectance supports spectral indices, while active radar measures scattering through most clouds, day or night.</p>}
-      <RainfallContext rain={rainfall.value} dates={(location ? inspected : measured).map(item => item.date)} />
-      {group.notes.slice(1).map(note => <p key={note}>{note}</p>)}
-      <p>Gold roads and blue waterways show mapped geographic context when enabled. The ivory outline shows the Ramsar designation.</p>
-      <h3>Interpretation</h3>
-      <p>Radar returns can vary with moisture, roughness, vegetation structure, speckle and processing. Optical and radar dates differ. Repeated clear optical views, local water-level observations or field surveys can help distinguish explanations.</p>
-    </aside>}
-    {step !== null && <Tour step={step} onStep={tourStep} onComplete={finishTour} />}
+    <div className="map-dock">
+      <section className="acquisition-card floating" aria-label="Selected acquisition">
+        {observation && group ? <>
+          <p className="acquisition-sensor"><span className="status-dot" />NISAR <span>·</span> <time dateTime={observation.timestamp}>{observationDate(observation.timestamp)}</time></p>
+          <p className="acquisition-view">{viewLabel[frequency]} <span>· {observation.postingM} m</span></p>
+          <p className="acquisition-quality">{observation.maturity} <span>· {pct(observation.coveragePct)} site coverage</span></p>
+          {group.exploratoryPairs && <p className="context-quality">Harmony · preliminary radar</p>}
+          <button className="details-trigger" aria-expanded={detailsOpen} aria-controls="imagery-details"
+            onClick={() => setDetailsOpen(!detailsOpen)}>Imagery Details <span aria-hidden="true">{detailsOpen ? '−' : '+'}</span></button>
+          {detailsOpen && <div id="imagery-details" className="imagery-details floating">
+            <h2>Imagery Details</h2>
+            <dl>
+              <dt>Acquired UTC</dt><dd>{observation.timestamp}</dd>
+              <dt>Sensor</dt><dd>Frequency {frequency} · {observation.band}-band · {observation.polarizations.join(' / ') || 'Channels unknown'}</dd>
+              <dt>Geometry</dt><dd>Track {observation.track} · Frame {observation.frame} · {observation.direction} · {observation.lookDirection ?? 'unknown'} look</dd>
+              <dt>Processing</dt><dd>{group.release} · {observation.processingVersion ?? 'processor version unknown'}</dd>
+              <dt>Coverage</dt><dd>{pct(observation.coveragePct)} valid site area · <a href={asset(observation.validDataFootprint)}>Footprint</a></dd>
+            </dl>
+            <h3>False-color display ranges</h3>
+            <ul>{([['red', 'HH'], ['green', 'HV'], ['blue', 'HH−HV']] as const).map(([color, channel]) =>
+              <li key={color}>{color} · {channel} · {ranges[color].join(' to ')} dB</li>)}</ul>
+            {group.notes.map(note => <p key={note}>{note}</p>)}
+            <p>{observation.productMetadata?.collection ?? observation.provenance?.collection ?? 'Source collection unknown'}</p>
+            <p className="granule">{observation.granuleId}</p>
+            {(observation.provenance?.downloadUrl || observation.productMetadata?.source) && <a
+              href={observation.provenance?.downloadUrl ?? observation.productMetadata?.source ?? undefined}>Source product</a>}
+          </div>}
+        </> : <p>Radar imagery unavailable.</p>}
+      </section>
+
+      <section className="time-card floating" aria-label="Acquisition timeline">
+        <div className="time-heading">
+          <div><h2>Acquisition timeline</h2><p>{timeline.length} dates <span>·</span> {track !== undefined ? `Track ${track}` : 'All tracks'} <span>·</span> {timeline[0]?.day.slice(0, 4) === timeline.at(-1)?.day.slice(0, 4) && <>{timeline[0]?.day.slice(0, 4)} <span>·</span> </>}Observation index</p></div>
+          <div className="time-actions">
+            <button className="step-button" disabled={previous < 0 || sensorChapter} aria-label="Previous acquisition" onClick={() => selectDate(previous)}>‹</button>
+            <button className="step-button" disabled={next < 0 || sensorChapter} aria-label="Next acquisition" onClick={() => selectDate(next)}>›</button>
+            <button className="primary play-button" disabled={sequence.length < 2 || sensorChapter}
+              onClick={togglePlay}>{playAnchor ? 'Pause' : 'Play'}</button>
+          </div>
+        </div>
+        <div className="timeline-slider">
+          <input type="range" min={0} max={Math.max(0, timeline.length - 1)} step={1}
+            value={Math.max(0, timelineIndex)} disabled={sensorChapter || timeline.length < 2}
+            aria-label="Acquisition date" aria-valuetext={selectedDay && observationDate(selectedDay)}
+            onChange={event => selectDate(Number(event.target.value))} />
+          <div className="slider-dates" aria-hidden="true">
+            {sliderLabels.map(({ day }) => <time key={day} dateTime={day}
+              className={day === selectedDay ? 'current' : undefined}>{shortDate(day)}</time>)}
+          </div>
+        </div>
+        <div className="time-footer">
+          <span>{sequence.length > 1 ? `${sequence.length} ${group?.exploratoryPairs ? 'Harmony passes' : 'compatible passes'} · ${shortDate(sequence[0].timestamp)} to ${shortDate(sequence.at(-1)!.timestamp)}`
+            : group?.qualityScreen === 'harmony' ? 'Browse only · full quality masks unavailable'
+              : 'Playback requires compatible observations'}</span>
+          {alternatives.length > 1 && <label>Product <select value={observation?.acquisitionId}
+            onChange={event => manualSelect(event.target.value)}>{alternatives.map(({ item }) =>
+              <option key={item.acquisitionId} value={item.acquisitionId}>{item.timestamp.slice(11, 19)} UTC · Track {item.track}</option>)}</select></label>}
+        </div>
+      </section>
+    </div>
+    {step !== null && <Tour step={step} context={tourContext} onStep={tourStep} onComplete={() => tourStep(null)} />}
   </main>
 }
 
 function App() {
-  const { value, failed } = useAsset<Catalog>('data/catalog.json')
-  const usable = value?.schemaVersion === 1 ? value.groups?.filter(group => group.observations.length) : undefined
-  if (value && usable?.length) return <Workspace catalog={{ ...value, groups: usable }} />
-  const empty = failed || Boolean(value)
-  return <div className="loading"><h1>Neerthadam</h1><p role="status">{empty ? 'No observation catalog is available.' : 'Loading Pallikaranai Marsh…'}</p>
-    {empty && <button type="button" onClick={() => location.reload()}>Try again</button>}</div>
+  const catalog = useAsset<Catalog>('data/catalog.json')
+  const composites = useAsset<CompositeCatalog>('data/composites.json')
+  const samples = useAsset<SampleCatalog>('data/samples.json')
+  const harmony = useAsset<HarmonySeriesManifest>('data/track149-harmony.json')
+  const products = useAsset<ProductMetadata>('data/product-metadata.json')
+  const parsed = useMemo(() => {
+    try { return catalog.value && parseCatalog(catalog.value) } catch { return undefined }
+  }, [catalog.value])
+  const archive = useMemo(() => {
+    if (!parsed || !harmony.value) return
+    return applyHarmonySeries(buildArchive(parsed, composites.value, samples.value, products.value), harmony.value)
+  }, [parsed, composites.value, samples.value, products.value, harmony.value])
+  if (parsed && archive?.length && composites.value) return <Workspace site={parsed.site} archive={archive} ranges={composites.value.ranges} />
+  const failed = catalog.failed || composites.failed || harmony.failed || (catalog.value && !parsed) || (archive && !archive.length)
+  return <div className="loading"><h1>Neerthadam</h1><p role="status">{failed ? 'The radar archive is unavailable.' : 'Loading Pallikaranai Marsh…'}</p>
+    {failed && <button type="button" onClick={() => location.reload()}>Try again</button>}</div>
 }
 
 createRoot(document.getElementById('root')!).render(<App />)

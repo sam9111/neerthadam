@@ -1,0 +1,26 @@
+{
+  "A": {
+    "samples": [
+      "#9853b9",
+      "#6d893c",
+      "#1d1f58",
+      "#d4a1a7"
+    ],
+    "sources": [
+      "data/harmony-browse-t149-p05023-a/2026-07-06-harmony-rgb.png",
+      "data/harmony-browse-t149-p05023-a/2026-07-18-harmony-rgb.png"
+    ]
+  },
+  "B": {
+    "samples": [
+      "#9b58b7",
+      "#6a843e",
+      "#2e2a61",
+      "#d3a2a5"
+    ],
+    "sources": [
+      "data/harmony-browse-t149-p05023-b/2026-07-06-harmony-rgb.png",
+      "data/harmony-browse-t149-p05023-b/2026-07-18-harmony-rgb.png"
+    ]
+  }
+}

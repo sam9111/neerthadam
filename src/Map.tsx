@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import maplibre, { type StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { asset, type Catalog, type LonLat } from './catalog'
 import type { ContextRaster } from './context'
+import { loadRaster, rasterSwipe } from './RasterSwipe'
 
 const style: StyleSpecification = {
   version: 8,
@@ -22,191 +23,184 @@ const style: StyleSpecification = {
   ],
 }
 
-type Swipe = { raster: ContextRaster; left: string; right: string }
+function addInfrastructure(view: maplibre.Map) {
+  view.addSource('local-waterway', { type: 'geojson', data: asset('context/pallikaranai-waterway.geojson'),
+    attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>' })
+  view.addLayer({ id: 'local-waterway', type: 'line', source: 'local-waterway',
+    paint: { 'line-color': '#7ccaff', 'line-width': 1.5, 'line-opacity': .82 } }, 'site-outline')
+  view.addSource('infrastructure', { type: 'vector', url: 'https://tiles.openfreemap.org/planet',
+    attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · OpenFreeMap' })
+  view.addSource('building-overview', { type: 'geojson', data: asset('context/pallikaranai-buildings.geojson'),
+    attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · OpenFreeMap' })
+  view.addLayer({ id: 'building-overview', type: 'fill', source: 'building-overview', maxzoom: 13,
+    paint: { 'fill-color': '#e6a26c', 'fill-opacity': .54 } }, 'site-outline')
+  view.addLayer({ id: 'buildings', minzoom: 13, type: 'fill', source: 'infrastructure', 'source-layer': 'building',
+    paint: { 'fill-color': '#e6a26c', 'fill-opacity': .42, 'fill-outline-color': '#bc825e' } }, 'site-outline')
+  view.addLayer({ id: 'waterways', type: 'line', source: 'infrastructure', 'source-layer': 'waterway',
+    paint: { 'line-color': '#7ccaff', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, .95, 15, 2], 'line-opacity': .82 } }, 'site-outline')
+}
+
+export type Annotation = {
+  id: string; point: LonLat; title: string; description: string; evidence: string
+  source: string; sourceUrl: string; verification: string; limitation: string; observationId?: string
+}
 
 type Props = {
-  site: Catalog['site']; raster?: ContextRaster; optical: boolean; opacity: number
-  coverage?: string; missing?: string; swipe?: Swipe
-  leftCoverage?: string; leftMissing?: string
-  selected?: LonLat; onInspect: (point: LonLat) => void
-  infrastructure: boolean; hideBasemap?: boolean
+  site: Catalog['site']; raster?: ContextRaster; hideBasemap: boolean
+  swipe?: { raster: ContextRaster; left: string; right: string }
+  buildings: boolean; waterways: boolean; boundary: boolean
+  cameraRevision: number; annotations: Annotation[]
 }
 
 function padding() {
   return window.innerWidth < 720
-    ? { top: 110, bottom: 190, left: 30, right: 54 }
-    : { top: 80, bottom: 120, left: 345, right: 100 }
+    ? { top: 112, bottom: 195, left: 44, right: 44 }
+    : { top: 90, bottom: 166, left: 160, right: 160 }
 }
 
-function rasterLayer(view: maplibre.Map, raster: ContextRaster | undefined, opacity: number) {
-  const source = view.getSource<maplibre.ImageSource>('observation')
-  if (source) {
-    const current = source.serialize()
-    if (raster && (current.type !== 'image' || current.url !== asset(raster.url))) {
-      source.updateImage({ url: asset(raster.url), coordinates: raster.coordinates })
-    }
-    view.setLayoutProperty('observation', 'visibility', raster ? 'visible' : 'none')
-    view.setPaintProperty('observation', 'raster-opacity', opacity)
-  } else if (raster) {
-    view.addSource('observation', { type: 'image', url: asset(raster.url), coordinates: raster.coordinates })
-    view.addLayer({ id: 'observation', type: 'raster', source: 'observation', paint: {
-      'raster-opacity': opacity, 'raster-resampling': 'nearest', 'raster-fade-duration': 0,
-    } }, 'site-outline')
-  }
-}
-
-function addBoundary(view: maplibre.Map, site: Catalog['site']) {
-  view.addSource('site', { type: 'geojson', data: asset(site.boundaryUrl) })
-  view.addLayer({ id: 'site-outline', type: 'line', source: 'site',
-    paint: { 'line-color': '#f2e1b0', 'line-width': 1.8 } })
-}
-
-function setFootprint(view: maplibre.Map, id: string, path: string | undefined, color: string) {
-  const source = view.getSource<maplibre.GeoJSONSource>(id)
-  if (!path) {
-    if (source) view.setLayoutProperty(id, 'visibility', 'none')
-    return
-  }
-  if (source) {
-    void source.setData(asset(path))
-    view.setLayoutProperty(id, 'visibility', 'visible')
-    return
-  }
-  view.addSource(id, { type: 'geojson', data: asset(path) })
-  view.addLayer({ id, type: 'fill', source: id, paint: {
-    'fill-color': color, 'fill-opacity': .35, 'fill-outline-color': color,
-  } }, 'site-outline')
-}
-
-function addInfrastructure(view: maplibre.Map) {
-  view.addSource('infrastructure', { type: 'vector', url: 'https://tiles.openfreemap.org/planet',
-    attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a> · OpenFreeMap' })
-  view.addLayer({ id: 'roads', type: 'line', source: 'infrastructure', 'source-layer': 'transportation',
-    filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary']]],
-    paint: { 'line-color': '#ffdb89', 'line-width': 1.7 } }, 'site-outline')
-  view.addLayer({ id: 'waterways', type: 'line', source: 'infrastructure', 'source-layer': 'waterway',
-    paint: { 'line-color': '#7ccaff', 'line-width': 2 } }, 'site-outline')
-}
-
-export function RadarMap({ site, raster, optical, opacity, coverage, missing, leftCoverage, leftMissing, swipe, selected, onInspect, infrastructure, hideBasemap }: Props) {
+export function RadarMap({ site, raster, hideBasemap, swipe, buildings, waterways, boundary, cameraRevision, annotations }: Props) {
   const shell = useRef<HTMLDivElement>(null)
-  const primaryNode = useRef<HTMLDivElement>(null)
-  const overlayNode = useRef<HTMLDivElement>(null)
-  const primary = useRef<maplibre.Map | null>(null)
-  const overlay = useRef<maplibre.Map | null>(null)
+  const node = useRef<HTMLDivElement>(null)
+  const map = useRef<maplibre.Map | null>(null)
+  const renderer = useRef<ReturnType<typeof rasterSwipe> | null>(null)
   const [ready, setReady] = useState(false)
-  const [overlayReady, setOverlayReady] = useState(false)
-  const [failure, setFailure] = useState(false)
-  const [primaryError, setPrimaryError] = useState(false)
-  const [overlayError, setOverlayError] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [rasterError, setRasterError] = useState(false)
+  const [contextError, setContextError] = useState(false)
   const [split, setSplit] = useState(50)
-  const inspecting = useRef(onInspect)
-  const hasSwipe = Boolean(swipe)
+  const [presentedSwipe, setPresentedSwipe] = useState<Props['swipe']>()
+  const leftRaster = swipe?.raster
 
-  useLayoutEffect(() => { inspecting.current = onInspect }, [onInspect])
-  const bounds: maplibre.LngLatBoundsLike = [[site.bounds[0], site.bounds[1]], [site.bounds[2], site.bounds[3]]]
+  const bounds: maplibre.LngLatBoundsLike = [
+    [site.bounds[0] - .025, site.bounds[1] - .009],
+    [site.bounds[2] + .025, site.bounds[3] + .009],
+  ]
 
   useEffect(() => {
     let view: maplibre.Map
     try {
-      view = new maplibre.Map({ container: primaryNode.current!, style, bounds,
+      view = new maplibre.Map({ container: node.current!, style, bounds, renderWorldCopies: false,
         fitBoundsOptions: { padding: padding(), duration: 0 }, maxPitch: 0, dragRotate: false,
         attributionControl: { compact: true } })
     } catch {
-      setFailure(true)
+      setFailed(true)
       return
     }
-    primary.current = view
+    map.current = view
     view.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right')
-    view.addControl(new maplibre.ScaleControl({ maxWidth: 95, unit: 'metric' }), 'bottom-right')
-    view.on('click', event => inspecting.current([event.lngLat.lng, event.lngLat.lat]))
+    view.addControl(new maplibre.ScaleControl({ maxWidth: 90, unit: 'metric' }), 'bottom-right')
     view.on('error', event => {
-      if ('sourceId' in event && ['observation', 'site', 'valid', 'missing'].includes(String(event.sourceId))) setPrimaryError(true)
+      if ('sourceId' in event && ['infrastructure', 'building-overview', 'local-waterway', 'satellite', 'site'].includes(String(event.sourceId))) {
+        setContextError(true)
+      }
     })
     view.on('load', () => {
-      addBoundary(view, site)
+      view.addSource('site', { type: 'geojson', data: asset(site.boundaryUrl) })
+      view.addLayer({ id: 'site-outline', type: 'line', source: 'site',
+        paint: { 'line-color': '#ddf4b1', 'line-width': 1.4 } })
+      addInfrastructure(view)
+      renderer.current = rasterSwipe(view)
+      try { view.addLayer(renderer.current.layer, 'local-waterway') }
+      catch { setFailed(true) }
       setReady(true)
     })
-    return () => { view.remove(); primary.current = null }
+    return () => { view.remove(); map.current = null; renderer.current = null }
   }, [site])
 
   useEffect(() => {
-    const master = primary.current
-    if (!ready || !hasSwipe || !master || !overlayNode.current) return
-    let view: maplibre.Map
-    try {
-      view = new maplibre.Map({ container: overlayNode.current, style, interactive: false,
-        attributionControl: false, maxPitch: 0 })
-    } catch {
-      setOverlayError(true)
+    const view = map.current
+    const imageLayer = renderer.current
+    if (!ready || !view || !imageLayer) return
+    let current = true
+    setRasterError(false)
+    if (!raster) {
+      setPending(false)
+      setPresentedSwipe(undefined)
+      imageLayer.setFrames()
+      view.setLayoutProperty('satellite', 'visibility', 'visible')
       return
     }
-    overlay.current = view
-    const sync = () => view.jumpTo({ center: master.getCenter(), zoom: master.getZoom(),
-      bearing: master.getBearing(), padding: master.getPadding() })
-    master.on('move', sync)
-    master.on('resize', sync)
-    view.on('error', event => {
-      if ('sourceId' in event && event.sourceId === 'observation') setOverlayError(true)
+    setPending(true)
+    Promise.all([loadRaster(raster), leftRaster ? loadRaster(leftRaster) : undefined]).then(([right, left]) => {
+      if (!current) return
+      setPending(false)
+      setPresentedSwipe(swipe)
+      view.setLayoutProperty('satellite', 'visibility', hideBasemap ? 'none' : 'visible')
+      imageLayer.setFrames(right, left)
+    }).catch(() => {
+      if (!current) return
+      setPending(false)
+      setRasterError(true)
+      setPresentedSwipe(undefined)
+      view.setLayoutProperty('satellite', 'visibility', 'visible')
+      imageLayer.setFrames()
     })
-    view.on('load', () => {
-      sync()
-      addBoundary(view, site)
-      setOverlayReady(true)
-    })
-    sync()
-    return () => {
-      master.off('move', sync)
-      master.off('resize', sync)
-      view.remove()
-      overlay.current = null
-      setOverlayReady(false)
-      setOverlayError(false)
+    return () => { current = false }
+  }, [ready, raster, leftRaster, swipe?.left, swipe?.right, hideBasemap])
+
+  useEffect(() => { renderer.current?.setSplit(split) }, [ready, split])
+
+  function fit() {
+    map.current?.fitBounds(bounds, { padding: padding(),
+      duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 450 })
+  }
+
+  useEffect(() => { if (ready && cameraRevision) fit() }, [ready, cameraRevision])
+
+  useEffect(() => {
+    if (!ready || !map.current) return
+    for (const [id, visible] of [['buildings', buildings], ['building-overview', buildings], ['waterways', waterways], ['local-waterway', waterways], ['site-outline', boundary]] as const) {
+      map.current.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none')
     }
-  }, [ready, hasSwipe, site])
+  }, [ready, buildings, waterways, boundary])
 
   useEffect(() => {
-    if (!ready || !primary.current) return
-    setPrimaryError(false)
-    rasterLayer(primary.current, raster, opacity)
-    primary.current.setLayoutProperty('satellite', 'visibility', hideBasemap ? 'none' : 'visible')
-    primary.current.setPaintProperty('satellite', 'raster-saturation', optical ? 0 : -.58)
-  }, [ready, raster, opacity, optical, hideBasemap])
-
-  const leftRaster = swipe?.raster
-  useEffect(() => {
-    if (!overlayReady || !overlay.current) return
-    setOverlayError(false)
-    rasterLayer(overlay.current, leftRaster, opacity)
-  }, [overlayReady, leftRaster, opacity])
-
-  useEffect(() => {
-    if (!ready || !primary.current) return
-    for (const view of [primary.current, overlayReady ? overlay.current : null]) {
-      if (!view) continue
-      setFootprint(view, 'valid', view === overlay.current ? leftCoverage ?? coverage : coverage, '#53e4ce')
-      setFootprint(view, 'missing', view === overlay.current ? leftMissing ?? (leftCoverage === undefined ? missing : undefined) : missing, '#ecad61')
-    }
-  }, [ready, overlayReady, coverage, missing, leftCoverage, leftMissing])
-
-  useEffect(() => {
-    const view = primary.current
-    if (!ready || !view) return
-    if (infrastructure && !view.getSource('infrastructure')) addInfrastructure(view)
-    for (const id of ['roads', 'waterways']) {
-      if (view.getLayer(id)) view.setLayoutProperty(id, 'visibility', infrastructure ? 'visible' : 'none')
-    }
-  }, [ready, infrastructure])
-
-  useEffect(() => {
-    if (!ready || !primary.current || !selected) return
-    const view = primary.current
-    const pin = document.createElement('span')
-    pin.className = 'inspection-marker'
-    pin.setAttribute('aria-hidden', 'true')
-    const marker = new maplibre.Marker({ element: pin }).setLngLat(selected).addTo(view)
+    const view = map.current
+    if (!ready || !view || !boundary || annotations.some(item => item.id === 'ramsar')) return
+    const caption = document.createElement('span')
+    caption.className = 'boundary-label'
+    caption.textContent = 'Ramsar site'
+    const marker = new maplibre.Marker({ element: caption, anchor: 'right', offset: [-7, 0] })
+      .setLngLat(site.center).addTo(view)
+    caption.removeAttribute('aria-label')
+    caption.setAttribute('role', 'presentation')
     return () => { marker.remove() }
-  }, [ready, selected])
+  }, [ready, site, boundary, annotations])
+
+  useEffect(() => {
+    const view = map.current
+    if (!ready || !view) return
+    const markers = annotations.map(annotation => {
+      const button = document.createElement('button')
+      button.className = 'annotation annotation-' + annotation.id
+      button.type = 'button'
+      button.textContent = annotation.title
+      const content = document.createElement('div')
+      const title = document.createElement('strong')
+      title.textContent = annotation.title
+      const body = document.createElement('p')
+      body.textContent = annotation.description
+      const source = document.createElement('a')
+      source.textContent = annotation.source
+      source.href = annotation.sourceUrl.startsWith('https:') ? annotation.sourceUrl : asset(annotation.sourceUrl)
+      source.target = '_blank'
+      source.rel = 'noreferrer'
+      const note = document.createElement('p')
+      note.textContent = annotation.evidence + ' · ' + annotation.limitation
+      content.append(title, body, source, note)
+      const narrow = window.innerWidth <= 720
+      const popup = new maplibre.Popup({
+        offset: narrow ? 12 : 27, maxWidth: narrow ? '175px' : '255px',
+        anchor: narrow ? 'top-right' : undefined,
+      }).setDOMContent(content)
+      const marker = new maplibre.Marker({ element: button, anchor: 'bottom', offset: [0, -13] })
+        .setLngLat(annotation.point).setPopup(popup).addTo(view)
+      button.setAttribute('aria-label', annotation.title)
+      return marker
+    })
+    return () => markers.forEach(marker => marker.remove())
+  }, [ready, annotations])
 
   function moveDivider(event: PointerEvent<HTMLDivElement>) {
     const rect = shell.current?.getBoundingClientRect()
@@ -214,26 +208,25 @@ export function RadarMap({ site, raster, optical, opacity, coverage, missing, le
   }
 
   return <div ref={shell} className="map-shell">
-    <div ref={primaryNode} className="map-canvas" aria-label="Interactive map of Pallikaranai Marsh" />
-    {swipe && !failure && <>
-      <div ref={overlayNode} className="map-canvas swipe-map" aria-hidden="true"
-        style={{ clipPath: `inset(0 ${100 - split}% 0 0)`, visibility: overlayReady ? 'visible' : 'hidden' }} />
-      <div className="map-divider" style={{ left: `${split}%` }} aria-hidden="true"
+    <div ref={node} className="map-canvas" aria-label="Interactive map of Pallikaranai Marsh" />
+    {swipe && presentedSwipe && !failed && <>
+      <div className="map-divider" style={{ left: `clamp(1px, ${split}%, calc(100% - 1px))` }} aria-hidden="true"
         onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); moveDivider(event) }}
         onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) moveDivider(event) }}>
         <span>↔</span>
       </div>
       <div className="map-swipe floating">
-        <div><span>{swipe.left}</span><span>{swipe.right}</span></div>
+        <div><span>{presentedSwipe.left}</span><span>{presentedSwipe.right}</span></div>
         <input type="range" min="0" max="100" value={split} aria-label="Map swipe divider"
-          aria-valuetext={`${split}% ${swipe.left}`} onChange={event => setSplit(Number(event.target.value))} />
+          aria-valuetext={`${split}% ${presentedSwipe.left}`} onChange={event => setSplit(Number(event.target.value))} />
       </div>
     </>}
-    {failure && <div className="map-fallback">{raster && <img src={asset(raster.url)} alt="Observation raster preview" />}
+    {failed && <div className="map-fallback">{raster && <img src={asset(raster.url)} alt="Observation raster preview" />}
       <p>Interactive mapping requires WebGL.</p></div>}
-    {(primaryError || overlayError) && <p className="map-status floating" role="status">A selected map layer could not load.</p>}
-    {!ready && !failure && <p className="map-status floating" role="status">Loading map…</p>}
-    <button type="button" className="fit floating" onClick={() => primary.current?.fitBounds(bounds,
-      { padding: padding(), duration: 350 })} disabled={!ready} aria-label="Fit map to Ramsar site" title="Fit to marsh">⌖</button>
+    <div className="map-notices" role="status">
+      {!failed && (rasterError ? <p>Selected imagery failed to load.</p> : !ready || pending ? <p>Loading map imagery…</p> : null)}
+      {contextError && <p>Some geographic context tiles are unavailable.</p>}
+    </div>
+    <button type="button" className="fit floating" onClick={fit} disabled={!ready} aria-label="Fit map to Ramsar site" title="Fit to marsh">⌖</button>
   </div>
 }
