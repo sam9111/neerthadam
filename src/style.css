@@ -142,7 +142,7 @@ button.primary:hover:not(:disabled) { background: #c4e592; color: #15342b; }
 .tour p { line-height: 1.4; font-size: 12px; color: #d5e2d8; }
 .tour-actions { display: flex; justify-content: space-between; margin-top: 10px; }
 .tour-actions button { min-height: 30px; font-size: 12px; }
-.chapter-4 .time-card, .chapter-5 .time-card { border-color: var(--lime); }
+.chapter-4 .time-card { border-color: var(--lime); }
 
 .map-divider {
   position: absolute; z-index: 1; top: 0; bottom: 0; width: 25px; transform: translateX(-50%);
@@ -239,3 +239,23 @@ button.primary:hover:not(:disabled) { background: #c4e592; color: #15342b; }
 .radar-channels { margin: 0 0 8px; font-size: 11px; line-height: 1.35; }
 .radar-channels dt { color: var(--lime); font: 600 10px var(--mono); margin-top: 6px; }
 .radar-channels dd { color: #d6e1d7; margin: 2px 0 0; }
+
+.inundation-key ul { display: grid; gap: 4px; margin: 6px 0; padding: 0; list-style: none; }
+.inundation-key li { display: flex; align-items: center; gap: 6px; }
+.inundation-key li i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+.timeline-controls { display: flex; align-items: center; gap: 12px; }
+.timeline-controls .timeline-slider { flex: 1; min-width: 0; }
+.display-mode { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 5px; }
+.display-mode button { background: transparent; border: 0; padding: 3px 7px; min-height: 26px; font-size: 11px; }
+.display-mode button[aria-pressed="true"] { background: var(--lime); color: var(--teal); }
+.chapter-5 .display-mode { border-color: var(--lime); }
+.inundation-info { border-top: 1px solid var(--line); margin-top: 7px; padding-top: 6px; }
+.inundation-info summary { cursor: pointer; color: var(--lime); font-size: 11px; }
+.inundation-info div { max-height: min(240px, 28dvh); overflow: auto; }
+.inundation-info p { margin-top: 7px; }
+@media (max-width: 720px) {
+  .timeline-controls { gap: 7px; }
+  .display-mode button { padding-inline: 4px; }
+  .timeline-controls .slider-dates time:not(:first-child):not(:last-child):not(.current) { display: none; }
+}

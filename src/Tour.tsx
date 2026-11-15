@@ -4,9 +4,9 @@ const chapters = [
   ['A Wetland Surrounded by a City', 'The lime outline marks the Ramsar site. Amber footprints show mapped buildings, and cyan lines trace mapped waterways. The designation covers part of a wider wetland landscape.'],
   ['Why Radar?', 'Radar records scattering through most clouds. Use the divider to see how cloud obscured the optical image of the site.'],
   ['Reading the Radar Landscape', 'Open the labeled building and channel to see the independent map sources. Red shows HH, green shows HV, and blue shows their difference. Similar colors can occur over different landscapes.'],
-  ['Watching the Marsh Through Time', 'Step through the archive with the timeline. Playback uses aligned Harmony crops with shared coverage. Repeated observations can reveal patterns worth investigating.'],
-  ['Move Between Observations', 'Drag the timeline slider or use the arrow keys to revisit an acquisition. Moisture, roughness, vegetation structure, viewing conditions and processing can all affect radar appearance.'],
-  ['Explore Freely', 'Use the slider to choose a date or play a compatible sequence. Use Layers to switch views and show landscape labels. The radar legend explains the colors, and Imagery Details records how the image was made.'],
+  ['Watching the Marsh Through Time', 'Use Play or Pause to watch aligned Harmony observations in sequence. Drag the slider or use the arrow keys to pause and revisit a date.'],
+  ['Exploring Potential Inundation', 'The map now shows the experimental inundation estimate for July 6. Read Why does this matter? to see how researchers could use it. Try Radar and Inundation beside the timeline to compare the same area.'],
+  ['Explore Freely', 'Use the timeline to revisit an acquisition and Layers to explore the landscape. Switch to Inundation on July 6 or July 18 to revisit the experimental estimate.'],
 ]
 
 export function Tour({ step, onStep, onComplete, context }: {

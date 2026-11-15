@@ -39,6 +39,9 @@ function initialTour() {
 }
 
 type Entry = { group: Series; item: Acquisition }
+type InundationCatalog = { observations: Record<string, ContextRaster>; colors: string[] }
+const inundationClasses = ['Classified as non-inundated', 'Likely open water', 'Possible inundated vegetation']
+
 type CloudExample = ContextRaster & { source: string; acquiredAt: string; usable: number; tested: number }
 
 function Workspace({ site, archive, ranges }: {
@@ -54,10 +57,12 @@ function Workspace({ site, archive, ranges }: {
   const [layersOpen, setLayersOpen] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [displayMode, setDisplayMode] = useState<'radar' | 'inundation'>('radar')
   const [overlays, setOverlays] = useState({ buildings: true, waterways: true, boundary: true, labels: false, optical: false })
   const swatches = useAsset<RadarSwatches>('context/radar-swatches.json').value
   const annotations = useAsset<Annotation[]>('context/landscape-annotations.json').value
   const optical = useAsset<OpticalCatalog>('context/sentinel/manifest.json').value?.observations[0]
+  const inundation = useAsset<InundationCatalog>('context/inundation/manifest.json')
   const cloudy = useAsset<CloudExample>('context/sentinel/cloud-example.json')
   const entries = useMemo(() => archive.flatMap(group => group.observations.map(item => ({ group, item })))
     .sort((a, b) => Date.parse(a.item.timestamp) - Date.parse(b.item.timestamp)), [archive])
@@ -98,7 +103,9 @@ function Workspace({ site, archive, ranges }: {
     left: `NISAR · ${shortDate(radarFrame.timestamp)}`,
     right: `Sentinel-2 · ${shortDate(opticalDate)}`,
   } : undefined
-  const raster = swipe ? opticalFrame : observation?.imagery ?? undefined
+  const inundationFrame = displayMode === 'inundation' && observation?.frequency === 'A'
+    ? inundation.value?.observations[observation.granuleId] : undefined
+  const raster = swipe ? opticalFrame : inundationFrame ?? observation?.imagery ?? undefined
 
   function manualSelect(id: string) {
     setPlayAnchor(undefined)
@@ -165,6 +172,7 @@ function Workspace({ site, archive, ranges }: {
   function tourStep(nextStep: number | null) {
     const defaultObservation = initial?.sequence[0]
     setStep(nextStep)
+    setDisplayMode(nextStep === 4 ? 'inundation' : 'radar')
     setTrack(initial?.group.track)
     setSelectedId(defaultObservation?.acquisitionId)
     setPlayAnchor(nextStep === 3 && (initial?.sequence.length ?? 0) > 1 ? defaultObservation?.id : undefined)
@@ -188,8 +196,8 @@ function Workspace({ site, archive, ranges }: {
     : undefined
   const visibleAnnotations = useMemo(() => overlays.labels && !(step === 3 && playAnchor)
     ? annotations?.filter(item => !item.observationId ||
-      (!overlays.optical && item.observationId === observation?.acquisitionId)) ?? noAnnotations
-    : noAnnotations, [annotations, overlays.labels, overlays.optical, step, playAnchor, observation?.acquisitionId])
+      (!overlays.optical && !inundationFrame && item.observationId === observation?.acquisitionId)) ?? noAnnotations
+    : noAnnotations, [annotations, overlays.labels, overlays.optical, inundationFrame, step, playAnchor, observation?.acquisitionId])
   const viewSwitch = [
     ['boundary', 'Ramsar site boundary'], ['buildings', 'Buildings'], ['waterways', 'Waterways'],
     ['optical', 'Optical imagery'], ['labels', 'Landscape labels'],
@@ -230,8 +238,12 @@ function Workspace({ site, archive, ranges }: {
         {viewSwitch.map(([key, label]) => <label key={key}><input type="checkbox" checked={overlays[key]}
           disabled={key === 'optical' && !optical && !(sensorChapter && cloudy.value) || key === 'labels' && !annotations}
           onChange={event => {
-            if (key === 'optical') setPlayAnchor(undefined)
-            setOverlays(state => ({ ...state, [key]: event.target.checked }))
+            const checked = event.target.checked
+            if (key === 'optical') {
+              setPlayAnchor(undefined)
+              if (checked) setDisplayMode('radar')
+            }
+            setOverlays(state => ({ ...state, [key]: checked }))
           }} /> {label}</label>)}
       </fieldset>
       {cloudyExample && <p><a href={cloudyExample.source}>Sentinel-2 · {observationDate(cloudyExample.acquiredAt)}</a>
@@ -242,7 +254,28 @@ function Workspace({ site, archive, ranges }: {
       <p>Buildings and waterways from OpenStreetMap.</p>
     </section>}
 
-    <RadarLegend frequency={frequency} swatches={swatches} expanded={legendOpen} onToggle={() => setLegendOpen(!legendOpen)} />
+    {displayMode === 'inundation' ? <section className="reading floating inundation-key" aria-label="Inundation estimate">
+      <strong>Inundation estimate</strong>
+      {inundationFrame && observation ? <>
+        <p>{observationDate(observation.timestamp)} · 10 m · Experimental</p>
+        <ul>{inundationClasses.map((label, index) => <li key={label}>
+          <i aria-hidden="true" style={{ background: inundation.value?.colors[index] }} />{label}
+        </li>)}</ul>
+        <p>Thresholds still need local validation. Areas without classified data show the basemap.</p>
+      </> : <p role="status">{inundation.value || inundation.failed
+        ? 'Estimate unavailable for this observation. Radar shown.'
+        : 'Loading inundation estimates…'}</p>}
+      <details key={step === 4 ? 'tour' : 'workspace'} className="inundation-info" open={step === 4}>
+        <summary>Why does this matter?</summary>
+        <div>
+          <p>Mapping potential inundation across multiple observations could eventually help researchers understand seasonal water distribution, investigate conditions near Okkiyam Maduvu, and evaluate areas targeted for wetland restoration.</p>
+          <p>The current prototype identifies candidate inundation signatures. Water depth and confirmed flooding require additional evidence.</p>
+          <p>NISAR’s L-band radar responds to water and vegetation differently from optical imagery. Neerthadam uses an experimental classification algorithm to highlight radar signatures consistent with open water or potentially inundated vegetation.</p>
+          <p>These preliminary results provide a starting point for investigating water conditions across Pallikaranai Marsh.</p>
+        </div>
+      </details>
+    </section> : <RadarLegend frequency={frequency} swatches={swatches} expanded={legendOpen}
+      onToggle={() => setLegendOpen(!legendOpen)} />}
 
     <div className="map-dock">
       <section className="acquisition-card floating" aria-label="Selected acquisition">
@@ -284,14 +317,26 @@ function Workspace({ site, archive, ranges }: {
               onClick={togglePlay}>{playAnchor ? 'Pause' : 'Play'}</button>
           </div>
         </div>
-        <div className="timeline-slider">
-          <input type="range" min={0} max={Math.max(0, timeline.length - 1)} step={1}
-            value={Math.max(0, timelineIndex)} disabled={sensorChapter || timeline.length < 2}
-            aria-label="Acquisition date" aria-valuetext={selectedDay && observationDate(selectedDay)}
-            onChange={event => selectDate(Number(event.target.value))} />
-          <div className="slider-dates" aria-hidden="true">
-            {sliderLabels.map(({ day }) => <time key={day} dateTime={day}
-              className={day === selectedDay ? 'current' : undefined}>{shortDate(day)}</time>)}
+        <div className="timeline-controls">
+          <div className="display-mode" role="group" aria-label="Map display">
+            {(['radar', 'inundation'] as const).map(mode => <button key={mode} type="button"
+              aria-pressed={displayMode === mode} disabled={sensorChapter}
+              onClick={() => {
+                if (mode === displayMode) return
+                setPlayAnchor(undefined)
+                setDisplayMode(mode)
+                if (mode === 'inundation') setOverlays(state => ({ ...state, optical: false }))
+              }}>{mode === 'radar' ? 'Radar' : 'Inundation'}</button>)}
+          </div>
+          <div className="timeline-slider">
+            <input type="range" min={0} max={Math.max(0, timeline.length - 1)} step={1}
+              value={Math.max(0, timelineIndex)} disabled={sensorChapter || timeline.length < 2}
+              aria-label="Acquisition date" aria-valuetext={selectedDay && observationDate(selectedDay)}
+              onChange={event => selectDate(Number(event.target.value))} />
+            <div className="slider-dates" aria-hidden="true">
+              {sliderLabels.map(({ day }) => <time key={day} dateTime={day}
+                className={day === selectedDay ? 'current' : undefined}>{shortDate(day)}</time>)}
+            </div>
           </div>
         </div>
         <div className="time-footer">
