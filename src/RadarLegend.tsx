@@ -1,36 +1,55 @@
 import type { Group } from './catalog'
+import type { RadarExample } from './radarExamples'
 
 export type RadarSwatches = Record<Group['frequency'], { samples: string[]; sources: string[] }>
 
-const examples = [
-  ['Magenta', 'The red HH and blue HH−HV channels stand out more than the green HV channel.'],
-  ['Olive green', 'The green HV channel stands out. Leaves and branches can scatter the signal into this channel, so some vegetation can have an olive-green appearance.'],
-  ['Dark blue', 'HH and HV contribute weakly, while contrast remains visible. Smooth water can return weak signals under some viewing conditions.'],
-  ['Pale pink', 'HH contributes strongly, with visible contributions from HV and contrast. Several kinds of surfaces can produce this mix.'],
+const channels = [
+  ['#ff777a', 'Red · HH (horizontal → horizontal)', 'NISAR sends horizontally polarized radar and measures the horizontal return. This channel responds to surface roughness, moisture, vegetation structure and built structures.'],
+  ['#9bd77a', 'Green · HV (horizontal → vertical)', 'NISAR sends horizontally polarized radar and measures the vertical return. This channel can respond to complex scattering within vegetation and other irregular structures.'],
+  ['#86b9ff', 'Blue · HH−HV contrast', 'Blue shows HH minus HV in decibels. More blue indicates stronger relative HH–HV contrast on the display’s normalized scale.'],
 ]
 
-export function RadarLegend({ frequency, swatches, expanded, onToggle }: {
+const colors = [
+  ['Magenta / purple', 'Prominent HH and contrast', 'Common in parts of the marsh. Several surface or vegetation conditions can produce this mix, including scattering from structures.', '#b851a7'],
+  ['Olive green', 'Prominent HV contribution', 'Grasses, shrubs and other irregular surfaces can scatter radar into HV. Vegetation identification requires independent evidence.', '#78813e'],
+  ['Dark blue', 'Prominent polarization contrast', 'Smooth or weakly scattering surfaces, including some open water, may look dark blue. Water presence requires independent evidence.', '#263b89'],
+  ['Pale pink', 'Mixed scattering with prominent HH', 'This mix appears in parts of the marsh and around some mapped buildings. Several surface types can produce it.', '#dca3bd'],
+]
+
+export function RadarLegend({ frequency, swatches, expanded, onToggle, examples, onExample }: {
   frequency: Group['frequency']; swatches?: RadarSwatches; expanded: boolean; onToggle: () => void
+  examples: RadarExample[]; onExample: (id: string) => void
 }) {
-  const colors = swatches?.[frequency].samples ?? []
-  return <section className="reading floating" aria-labelledby="reading-title">
+  const samples = swatches?.[frequency].samples
+  return <section className="reading floating" aria-labelledby="reading-title" data-expanded={expanded}>
     <button className="reading-toggle" aria-expanded={expanded} aria-controls="radar-interpretation" onClick={onToggle}>
       <strong id="reading-title">Reading the radar</strong><span aria-hidden="true">{expanded ? '−' : '+'}</span>
     </button>
-    <div className="radar-key"><span className="sample-strip" aria-hidden="true">
-      {colors.map(color => <i key={color} style={{ background: color }} />)}
-    </span><span>HH · HV · HH−HV</span></div>
-    <p>Color shows how strongly the surface returns radar signals.</p>
+    <div className="radar-key">HH · HV · HH−HV | NISAR L-band</div>
+    <p>In this false-color radar image, colors combine backscatter measurements to show how the landscape reflects microwave signals.</p>
     <div id="radar-interpretation" hidden={!expanded}>
-      <dl className="radar-channels">
-        <dt>Red · HH</dt><dd>NISAR sends a horizontal signal and measures the horizontal echo. Buildings oriented toward the radar and rough ground can give strong returns.</dd>
-        <dt>Green · HV</dt><dd>NISAR sends a horizontal signal and measures the vertical part of the echo. Leaves and branches can scatter radar into this channel.</dd>
-        <dt>Blue · HH−HV</dt><dd>Shows HH minus HV in decibels. More blue means a larger gap in favor of HH.</dd>
-      </dl>
-      {colors.length > 0 && <ul>{examples.map(([label, body], index) => <li key={label}>
-        <i aria-hidden="true" style={{ background: colors[index] }} /><div><strong>{label}</strong> {body}{index === 3 && frequency === 'A' && ' You can see pale pink around many mapped buildings in the July 10 m images. Turn on Buildings in Layers to see their footprints.'}</div>
-      </li>)}</ul>}
-      <p>These Frequency {frequency} examples show radar responses. Different surfaces can share a color, and moisture and viewing angle can change it.</p>
+      <div className="interpretation-note">
+        <strong>Radar colors are clues, not land-cover classifications.</strong>
+        <p>Different surfaces can produce similar responses. Moisture, vegetation structure, roughness, viewing geometry and display normalization affect the colors.</p>
+      </div>
+      <div className="channel-list">
+        {channels.map(([color, label, body]) => <details key={label}>
+          <summary><i className="interpretation-swatch" style={{ background: color }} />{label}</summary>
+          <p>{body}</p>
+        </details>)}
+      </div>
+      <ul className="interpretation-cards">{colors.map(([label, signal, body, color], index) => <li key={label}>
+        <i aria-hidden="true" style={{ background: samples?.[index] ?? color }} />
+        <div><strong>{label}</strong><p>{signal}. {body}</p></div>
+      </li>)}</ul>
+      {examples.length > 0 && <div className="radar-examples">
+        <strong>Radar examples</strong>
+        <ul>{examples.map(example => <li key={example.id}>
+          <span>{example.number}. {example.title}</span>
+          <button type="button" aria-label={`View ${example.title.toLowerCase()} on map`}
+            onClick={() => onExample(example.id)}>View on map</button>
+        </li>)}</ul>
+      </div>}
       <p><a href="https://science.nasa.gov/mission/nisar/polarimetry/" target="_blank" rel="noreferrer">NASA guide to radar polarization</a></p>
     </div>
   </section>

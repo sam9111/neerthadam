@@ -9,6 +9,8 @@ import {
 import type { ContextRaster, OpticalCatalog } from './context'
 import { loadRaster } from './RasterSwipe'
 import { RadarLegend, type RadarSwatches } from './RadarLegend'
+import { radarExamples } from './radarExamples'
+import { InundationLegend } from './InundationLegend'
 import { Tour } from './Tour'
 import './style.css'
 
@@ -40,7 +42,6 @@ function initialTour() {
 
 type Entry = { group: Series; item: Acquisition }
 type InundationCatalog = { observations: Record<string, ContextRaster>; colors: string[] }
-const inundationClasses = ['Classified as non-inundated', 'Likely open water', 'Possible inundated vegetation']
 
 type CloudExample = ContextRaster & { source: string; acquiredAt: string; usable: number; tested: number }
 
@@ -58,7 +59,8 @@ function Workspace({ site, archive, ranges }: {
   const [legendOpen, setLegendOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [displayMode, setDisplayMode] = useState<'radar' | 'inundation'>('radar')
-  const [overlays, setOverlays] = useState({ buildings: true, waterways: true, boundary: true, labels: false, optical: false })
+  const [exampleFocus, setExampleFocus] = useState<{ id: string; revision: number }>()
+  const [overlays, setOverlays] = useState({ buildings: true, waterways: true, boundary: true, labels: false, optical: false, examples: false })
   const swatches = useAsset<RadarSwatches>('context/radar-swatches.json').value
   const annotations = useAsset<Annotation[]>('context/landscape-annotations.json').value
   const optical = useAsset<OpticalCatalog>('context/sentinel/manifest.json').value?.observations[0]
@@ -172,11 +174,12 @@ function Workspace({ site, archive, ranges }: {
   function tourStep(nextStep: number | null) {
     const defaultObservation = initial?.sequence[0]
     setStep(nextStep)
+    setExampleFocus(undefined)
     setDisplayMode(nextStep === 4 ? 'inundation' : 'radar')
     setTrack(initial?.group.track)
     setSelectedId(defaultObservation?.acquisitionId)
     setPlayAnchor(nextStep === 3 && (initial?.sequence.length ?? 0) > 1 ? defaultObservation?.id : undefined)
-    setOverlays({ buildings: true, waterways: true, boundary: true, labels: nextStep === 2, optical: nextStep === 1 })
+    setOverlays({ buildings: true, waterways: true, boundary: true, labels: nextStep === 2, optical: nextStep === 1, examples: false })
     setLegendOpen(nextStep === 2)
     setDetailsOpen(false)
     setLayersOpen(false)
@@ -200,12 +203,13 @@ function Workspace({ site, archive, ranges }: {
     : noAnnotations, [annotations, overlays.labels, overlays.optical, inundationFrame, step, playAnchor, observation?.acquisitionId])
   const viewSwitch = [
     ['boundary', 'Ramsar site boundary'], ['buildings', 'Buildings'], ['waterways', 'Waterways'],
-    ['optical', 'Optical imagery'], ['labels', 'Landscape labels'],
+    ['optical', 'Optical imagery'], ['labels', 'Landscape labels'], ['examples', 'Radar examples'],
   ] as const
 
   return <main className={`explorer ${step === null ? '' : `tour-active chapter-${step + 1}`} ${swipe ? 'comparison-open' : ''}`}>
     <RadarMap site={site} raster={raster} swipe={swipe} cameraRevision={cameraRevision}
       hideBasemap={Boolean(cloudyExample && swipe)} annotations={visibleAnnotations}
+      showExamples={overlays.examples} exampleFocus={exampleFocus} observation={radarFrame}
       buildings={overlays.buildings} waterways={overlays.waterways} boundary={overlays.boundary} />
     <header className="brand floating">
       <div className="brand-mark" aria-hidden="true"><i /><i /><i /></div>
@@ -239,6 +243,7 @@ function Workspace({ site, archive, ranges }: {
           disabled={key === 'optical' && !optical && !(sensorChapter && cloudy.value) || key === 'labels' && !annotations}
           onChange={event => {
             const checked = event.target.checked
+            if (key === 'examples' && !checked) setExampleFocus(undefined)
             if (key === 'optical') {
               setPlayAnchor(undefined)
               if (checked) setDisplayMode('radar')
@@ -254,28 +259,17 @@ function Workspace({ site, archive, ranges }: {
       <p>Buildings and waterways from OpenStreetMap.</p>
     </section>}
 
-    {displayMode === 'inundation' ? <section className="reading floating inundation-key" aria-label="Inundation estimate">
-      <strong>Inundation estimate</strong>
-      {inundationFrame && observation ? <>
-        <p>{observationDate(observation.timestamp)} · 10 m · Experimental</p>
-        <ul>{inundationClasses.map((label, index) => <li key={label}>
-          <i aria-hidden="true" style={{ background: inundation.value?.colors[index] }} />{label}
-        </li>)}</ul>
-        <p>Thresholds still need local validation. Areas without classified data show the basemap.</p>
-      </> : <p role="status">{inundation.value || inundation.failed
-        ? 'Estimate unavailable for this observation. Radar shown.'
-        : 'Loading inundation estimates…'}</p>}
-      <details key={step === 4 ? 'tour' : 'workspace'} className="inundation-info" open={step === 4}>
-        <summary>Why does this matter?</summary>
-        <div>
-          <p>Mapping potential inundation across multiple observations could eventually help researchers understand seasonal water distribution, investigate conditions near Okkiyam Maduvu, and evaluate areas targeted for wetland restoration.</p>
-          <p>The current prototype identifies candidate inundation signatures. Water depth and confirmed flooding require additional evidence.</p>
-          <p>NISAR’s L-band radar responds to water and vegetation differently from optical imagery. Neerthadam uses an experimental classification algorithm to highlight radar signatures consistent with open water or potentially inundated vegetation.</p>
-          <p>These preliminary results provide a starting point for investigating water conditions across Pallikaranai Marsh.</p>
-        </div>
-      </details>
-    </section> : <RadarLegend frequency={frequency} swatches={swatches} expanded={legendOpen}
-      onToggle={() => setLegendOpen(!legendOpen)} />}
+    {displayMode === 'inundation'
+      ? <InundationLegend date={observation?.timestamp} colors={inundation.value?.colors}
+        available={Boolean(inundationFrame)} loading={!inundation.value && !inundation.failed} tour={step === 4} />
+      : <RadarLegend frequency={frequency} swatches={swatches} expanded={legendOpen}
+        onToggle={() => setLegendOpen(!legendOpen)} examples={radarExamples}
+        onExample={id => {
+          setOverlays(state => ({ ...state, examples: true }))
+          setLayersOpen(false)
+          setLegendOpen(false)
+          setExampleFocus(previous => ({ id, revision: (previous?.revision ?? 0) + 1 }))
+        }} />}
 
     <div className="map-dock">
       <section className="acquisition-card floating" aria-label="Selected acquisition">

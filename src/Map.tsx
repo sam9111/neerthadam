@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import maplibre, { type StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { asset, type Catalog, type LonLat } from './catalog'
+import type { Acquisition } from './archive'
+import { radarExamples, type RadarExample } from './radarExamples'
+import { RadarExamplePopup } from './RadarExamplePopup'
 import type { ContextRaster } from './context'
 import { loadRaster, rasterSwipe } from './RasterSwipe'
 
@@ -50,6 +54,7 @@ type Props = {
   swipe?: { raster: ContextRaster; left: string; right: string }
   buildings: boolean; waterways: boolean; boundary: boolean
   cameraRevision: number; annotations: Annotation[]
+  showExamples: boolean; exampleFocus?: { id: string; revision: number }; observation?: Acquisition
 }
 
 function padding() {
@@ -58,7 +63,8 @@ function padding() {
     : { top: 90, bottom: 166, left: 160, right: 160 }
 }
 
-export function RadarMap({ site, raster, hideBasemap, swipe, buildings, waterways, boundary, cameraRevision, annotations }: Props) {
+export function RadarMap({ site, raster, hideBasemap, swipe, buildings, waterways, boundary, cameraRevision, annotations,
+  showExamples, exampleFocus, observation }: Props) {
   const shell = useRef<HTMLDivElement>(null)
   const node = useRef<HTMLDivElement>(null)
   const map = useRef<maplibre.Map | null>(null)
@@ -70,6 +76,8 @@ export function RadarMap({ site, raster, hideBasemap, swipe, buildings, waterway
   const [contextError, setContextError] = useState(false)
   const [split, setSplit] = useState(50)
   const [presentedSwipe, setPresentedSwipe] = useState<Props['swipe']>()
+  const exampleMarkers = useRef(new Map<string, { marker: maplibre.Marker; popup: maplibre.Popup }>())
+  const [openExample, setOpenExample] = useState<{ example: RadarExample; host: HTMLDivElement }>()
   const leftRaster = swipe?.raster
 
   const bounds: maplibre.LngLatBoundsLike = [
@@ -202,12 +210,74 @@ export function RadarMap({ site, raster, hideBasemap, swipe, buildings, waterway
     return () => markers.forEach(marker => marker.remove())
   }, [ready, annotations])
 
+  useEffect(() => {
+    const view = map.current
+    if (!ready || !view || !showExamples) return
+    const markers = exampleMarkers.current
+    for (const example of radarExamples) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'radar-example-marker'
+      button.textContent = String(example.number)
+      const host = document.createElement('div')
+      const popup = new maplibre.Popup({ offset: 16, maxWidth: 'min(265px, calc(100vw - 32px))',
+        focusAfterOpen: false, className: 'radar-example-popover' }).setDOMContent(host)
+      popup.setLngLat(example.point)
+      const marker = new maplibre.Marker({ element: button }).setLngLat(example.point).addTo(view)
+      button.setAttribute('aria-label', `Radar example ${example.number}, ${example.title}`)
+      button.setAttribute('aria-expanded', 'false')
+      button.addEventListener('click', event => {
+        event.stopPropagation()
+        if (popup.isOpen()) popup.remove()
+        else popup.addTo(view)
+      })
+      popup.on('open', () => {
+        for (const entry of markers.values()) {
+          if (entry.popup !== popup) entry.popup.remove()
+        }
+        button.setAttribute('aria-expanded', 'true')
+        setOpenExample({ example, host })
+      })
+      popup.on('close', () => {
+        button.setAttribute('aria-expanded', 'false')
+        setOpenExample(current => current?.host === host ? undefined : current)
+      })
+      markers.set(example.id, { marker, popup })
+    }
+    return () => {
+      for (const { marker, popup } of markers.values()) {
+        popup.remove()
+        marker.remove()
+      }
+      markers.clear()
+    }
+  }, [ready, showExamples])
+
+  useEffect(() => {
+    const view = map.current
+    const selected = exampleFocus && exampleMarkers.current.get(exampleFocus.id)
+    if (!ready || !showExamples || !view || !selected) return
+    const point = selected.marker.getLngLat()
+    const small = view.getContainer().clientWidth <= 720
+    view.easeTo({
+      center: point, zoom: Math.max(view.getZoom(), 15.5),
+      offset: small ? [0, -65] : [-75, -30],
+      duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 650,
+    })
+    if (!selected.popup.isOpen()) selected.popup.addTo(view)
+    selected.marker.getElement().focus({ preventScroll: true })
+  }, [ready, showExamples, exampleFocus])
+
   function moveDivider(event: PointerEvent<HTMLDivElement>) {
     const rect = shell.current?.getBoundingClientRect()
     if (rect?.width) setSplit(Math.round(Math.max(0, Math.min(100, (event.clientX - rect.left) * 100 / rect.width))))
   }
 
   return <div ref={shell} className="map-shell">
+    {openExample && createPortal(
+      <RadarExamplePopup key={openExample.example.id} example={openExample.example} observation={observation} />,
+      openExample.host,
+    )}
     <div ref={node} className="map-canvas" aria-label="Interactive map of Pallikaranai Marsh" />
     {swipe && presentedSwipe && !failed && <>
       <div className="map-divider" style={{ left: `clamp(1px, ${split}%, calc(100% - 1px))` }} aria-hidden="true"
