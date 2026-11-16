@@ -2,6 +2,8 @@
 
 Explore repeated NISAR observations of Pallikaranai Marsh, Chennai. The map opens with the 10 m Detailed Marsh radar view, the Ramsar designation, mapped buildings and waterways.
 
+SI assisted in generating Neerthadam’s code and derived data products. [Project repository](https://github.com/sam9111/neerthadam)
+
 ```sh
 npm ci
 npm run dev

@@ -213,7 +213,12 @@ function Workspace({ site, archive, ranges }: {
       buildings={overlays.buildings} waterways={overlays.waterways} boundary={overlays.boundary} />
     <header className="brand floating">
       <div className="brand-mark" aria-hidden="true"><i /><i /><i /></div>
-      <div><h1>Neerthadam <span lang="ta">நீர்த்தடம்</span></h1><p>Pallikaranai Marsh <span>· Chennai, India</span></p></div>
+      <div>
+        <h1>Neerthadam <span lang="ta">நீர்த்தடம்</span></h1>
+        <p>Pallikaranai Marsh <span>· Chennai, India</span></p>
+        <p className="brand-credit">SI-assisted code and derived data <a href="https://github.com/sam9111/neerthadam"
+          target="_blank" rel="noreferrer" aria-label="Neerthadam on GitHub">GitHub</a></p>
+      </div>
     </header>
     <div className="view-switch floating" aria-label="Map controls">
       <button type="button" aria-expanded={layersOpen} aria-controls="layer-menu" onClick={() => setLayersOpen(!layersOpen)}>Layers</button>

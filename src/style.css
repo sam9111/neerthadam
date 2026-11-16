@@ -50,6 +50,8 @@ input { accent-color: var(--lime); }
 .brand h1 span { color: var(--sage); margin-left: 6px; font-size: .52em; letter-spacing: 0; font-weight: 500; }
 .brand p { font-size: 12px; color: var(--lime); margin-top: 5px; }
 .brand p span { color: var(--sage); }
+.brand .brand-credit { color: var(--sage); font-size: 11px; }
+.brand-credit a { margin-left: 4px; text-decoration: underline; text-underline-offset: 2px; }
 .brand-mark {
   width: 28px; height: 28px; border: 1px solid var(--sage); border-radius: 50%;
   display: grid; justify-content: center; align-content: center; gap: 3px; transform: rotate(-25deg);
@@ -169,11 +171,12 @@ button.primary:hover:not(:disabled) { background: #c4e592; color: #15342b; }
 
 @media (max-width: 720px) {
   :root { --edge: 10px; --dock-height: 144px; }
-  .brand { padding: 8px 9px; gap: 7px; }
+  .brand { padding: 8px 9px; gap: 7px; max-width: calc(100% - 111px); }
   .brand h1 { font-size: 20px; }
   .brand h1 span { margin-left: 2px; }
   .brand p { font-size: 10px; }
-  .brand-mark { width: 20px; height: 20px; }
+  .brand .brand-credit { font-size: 10px; }
+  .brand-mark { width: 20px; height: 20px; flex: none; }
   .brand-mark i { width: 10px; }
   .brand-mark i:first-child, .brand-mark i:last-child { width: 6px; }
   .view-switch button { padding-inline: 7px; font-size: 12px; }
@@ -194,7 +197,7 @@ button.primary:hover:not(:disabled) { background: #c4e592; color: #15342b; }
   .reading p { font-size: 10px; }
   .reading-toggle { font-size: 12px; }
   .radar-key { gap: 4px; font-size: 9px; }
-  .tour { top: calc(var(--edge) + 62px); width: min(278px, calc(100% - var(--edge) * 2 - 33px)); padding: 9px; }
+  .tour { top: calc(var(--edge) + 80px); width: min(278px, calc(100% - var(--edge) * 2 - 33px)); padding: 9px; }
   .tour h2 { font-size: 17px; margin-block: 6px; }
   .tour p { font-size: 11px; }
   .tour-actions { margin-top: 6px; }
