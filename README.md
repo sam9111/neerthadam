@@ -1,23 +1,37 @@
-# Neerthadam · Pallikaranai Marsh
+# Neerthadam · நீர்த்தடம்
 
-Explore repeated NISAR observations of Pallikaranai Marsh, Chennai. The map opens with the 10 m Detailed Marsh radar view, the Ramsar designation, mapped buildings and waterways.
+Neerthadam is an interactive explorer for NASA–ISRO NISAR radar observations of Pallikaranai Marsh, a Ramsar wetland in Chennai, India. Use the map to browse acquisitions, compare radar and optical imagery, and see how wetland vegetation, open water, and buildings can produce different radar returns.
 
-SI assisted in generating Neerthadam’s code and derived data products. [Project repository](https://github.com/sam9111/neerthadam)
+
+
+
+https://github.com/user-attachments/assets/19805e37-d532-4173-87b2-6e9217c5f9d1
+
+
+
+## Explore the map
+
+- **Acquisition timeline** — Browse 15 NISAR acquisitions from June 25 to November 11, 2026, across Tracks 84, 149, and 156. Use **Layers** to switch between the 10 m Frequency A and 80 m Frequency B views where available.
+- **Reading the radar** — Learn how the false-color composite assigns HH to red, HV to green, and HH−HV to blue. Each channel is scaled for display. Similar colors can occur over different surfaces. [NASA guide to NISAR polarimetry](https://science.nasa.gov/mission/nisar/polarimetry/)
+- **Radar examples** — Open three optional map markers for wetland vegetation, open water, and a built-up area. The popovers show dated reference evidence and native HH/HV measurements in dB for the selected acquisition, where available.
+- **Optical imagery** — Use the swipe divider to compare a Sentinel-2 image with the radar view. The divider labels show the acquisition date of each image.
+- **Inundation estimate** — Explore two **experimental, locally unvalidated** 10 m estimates for July 6 and July 18, 2026. The map falls back to radar when the selected acquisition has no classification raster.
+
+## Data and methods
+
+The app uses calibrated NISAR Level-2 Geocoded Covariance (GCOV) products. The archive contains **28 false-color composites and 28 native measurement grids**, with **12.45 million valid paired HH/HV pixel samples**. The sample count includes repeat observations of the same location across dates and frequencies. [Observation catalog](public/data/catalog.json) · [Radar example coordinates and provenance](RADAR_EXAMPLES.md)
+
+The inundation prototype applies experimental thresholds to radar-derived features to identify candidate open water and possible inundated vegetation. Some candidate vegetation pixels overlap mapped buildings. A developed-land exclusion is under evaluation for future estimates. Confirmed flooding, water depth, and vegetation condition require independent evidence. [Published raster manifest](public/context/inundation/manifest.json) · [Upstream NISAR inundation methodology](https://github.com/NISAR-Science-Algorithms/NISAR_Inundation/blob/main/notebooks/NISAR_L3_Inundation_ProductGeneration.ipynb)
+
+## Run locally
 
 ```sh
 npm ci
 npm run dev
-npm run build
 ```
 
-Open the Vite URL printed by the development server. The production build writes the static application to `dist/`. Radar, optical imagery and local context are served from `public/`. The satellite basemap and detailed infrastructure use Esri and OpenFreeMap.
+Open the local URL printed by Vite. To create a production build, run `npm run build`. The build output is written to `dist/`.
 
-- Use the timeline to browse acquisitions. **Play** advances through a verified compatible sequence.
-- **Compare** opens a catalog-approved pair. Drag the divider or move the slider with the keyboard.
-- **Layers** switches between 10 m Frequency A and 80 m Frequency B and controls optical imagery and geographic overlays.
-- **Reading the radar** explains the false-color display. **Imagery Details** lists acquisition metadata, coverage, display ranges and provenance.
-- **Help** replays the six-chapter first-visit tour.
+## Acknowledgments
 
-The three existing manifests in `public/data/` supply observation metadata and verified pairs, false-color rasters and native sample grids. The supplemental product metadata adds source registry information by granule ID. The native sidecars hold little-endian Float32 HH and HV layers, with NaN for NoData.
-
-See the [acquisition audit](../docs/v2-acquisition-audit.md) for dates, coverage and scientific limits and the [implementation and verification report](../docs/neerthadam-v2.md) for the browser checks, screenshots and ingestion contract.
+Neerthadam’s code and derived data products were generated with SI assistance. Source observations and reference data come from NASA–ISRO NISAR, Copernicus Sentinel-2, USGS Landsat, ESA WorldCover, OpenStreetMap contributors, and the Ramsar Sites Information Service. The app and its provenance records identify the sources used for each layer and example.
