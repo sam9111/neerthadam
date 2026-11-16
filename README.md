@@ -4,6 +4,7 @@ Neerthadam is an interactive explorer for NASA–ISRO NISAR radar observations o
 
 
 
+[Neerthadam Presentation.pdf](https://github.com/user-attachments/files/34896367/Neerthadam.Presentation.1.pdf)
 
 https://github.com/user-attachments/assets/19805e37-d532-4173-87b2-6e9217c5f9d1
 
